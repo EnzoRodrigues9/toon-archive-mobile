@@ -34,6 +34,40 @@ class _ComunidadePageState extends State<ComunidadePage> {
     });
   }
 
+  void editarMensagem(int index) {
+    controller.text = mensagens[index]['texto'];
+    showDialog(
+      context: context,
+      builder: (_) => AlertDialog(
+        title: const Text('Editar mensagem'),
+        content: TextField(
+          controller: controller,
+          autofocus: true,
+          decoration: const InputDecoration(hintText: 'Digite a mensagem'),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () {
+              setState(() {
+                mensagens[index]['texto'] = controller.text;
+              });
+              controller.clear();
+              Navigator.pop(context);
+            },
+            child: const Text('Salvar'),
+          ),
+          TextButton(
+            onPressed: () {
+              controller.clear();
+              Navigator.pop(context);
+            },
+            child: const Text('Cancelar'),
+          ),
+        ],
+      ),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     final isDark = Theme.of(context).brightness == Brightness.dark;
@@ -78,7 +112,15 @@ class _ComunidadePageState extends State<ComunidadePage> {
                         ),
                       ),
 
-                      if (msg['minha'])
+                      if (msg['minha']) ...[
+                        IconButton(
+                          icon: Icon(
+                            Icons.edit,
+                            size: 18,
+                            color: isDark ? Colors.white : Colors.black87,
+                          ),
+                          onPressed: () => editarMensagem(index),
+                        ),
                         IconButton(
                           icon: Icon(
                             Icons.delete,
@@ -87,6 +129,7 @@ class _ComunidadePageState extends State<ComunidadePage> {
                           ),
                           onPressed: () => excluirMensagem(index),
                         ),
+                      ],
                     ],
                   ),
                 ),
@@ -110,7 +153,6 @@ class _ComunidadePageState extends State<ComunidadePage> {
                   ),
                 ),
               ),
-
               IconButton(
                 icon: const Icon(Icons.send),
                 onPressed: enviarMensagem,
