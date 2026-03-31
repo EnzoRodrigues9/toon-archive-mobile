@@ -14,10 +14,10 @@ class LeituraPage extends StatefulWidget {
 
 class _LeituraPageState extends State<LeituraPage> {
   bool modoClique = false;
-  late PageController controller;
+  PageController? controller;
   final TextEditingController comentarioController = TextEditingController();
-  Map<String, List<String>> comentariosPorCapitulo = {};
-  late String capituloAtual;
+  final Map<String, List<String>> comentariosPorCapitulo = {};
+  String capituloAtual = '';
 
   @override
   void initState() {
@@ -25,9 +25,19 @@ class _LeituraPageState extends State<LeituraPage> {
     carregarCapituloInicial();
   }
 
+  @override
+  void dispose() {
+    controller?.dispose();
+    comentarioController.dispose();
+    super.dispose();
+  }
+
   Future<void> carregarCapituloInicial() async {
     final prefs = await SharedPreferences.getInstance();
-    String? salvo = prefs.getString('${widget.titulo}_ultimo_capitulo');
+    final salvo = prefs.getString('${widget.titulo}_ultimo_capitulo');
+
+    if (!mounted) return;
+
     setState(() {
       capituloAtual = widget.capitulo.isNotEmpty
           ? widget.capitulo
@@ -42,16 +52,21 @@ class _LeituraPageState extends State<LeituraPage> {
   }
 
   List<String> get capitulos => biblioteca[widget.titulo]!.keys.toList();
+
   List<String> getPaginas() =>
       biblioteca[widget.titulo]?[capituloAtual] ?? ['assets/default.jpg'];
+
   String get chaveComentario => '${widget.titulo}-$capituloAtual';
+
   List<String> get comentarios => comentariosPorCapitulo[chaveComentario] ?? [];
 
   void adicionarComentario() {
-    if (comentarioController.text.isNotEmpty) {
+    if (comentarioController.text.trim().isNotEmpty) {
       setState(() {
         comentariosPorCapitulo.putIfAbsent(chaveComentario, () => []);
-        comentariosPorCapitulo[chaveComentario]!.add(comentarioController.text);
+        comentariosPorCapitulo[chaveComentario]!.add(
+          comentarioController.text.trim(),
+        );
         comentarioController.clear();
       });
     }
@@ -69,12 +84,19 @@ class _LeituraPageState extends State<LeituraPage> {
             onPressed: () {
               setState(() {
                 comentariosPorCapitulo[chaveComentario]![index] =
-                    comentarioController.text;
+                    comentarioController.text.trim();
               });
               comentarioController.clear();
               Navigator.pop(context);
             },
             child: const Text('Salvar'),
+          ),
+          TextButton(
+            onPressed: () {
+              comentarioController.clear();
+              Navigator.pop(context);
+            },
+            child: const Text('Cancelar'),
           ),
         ],
       ),
@@ -90,121 +112,168 @@ class _LeituraPageState extends State<LeituraPage> {
   void mudarCapitulo(String novoCapitulo) {
     setState(() {
       capituloAtual = novoCapitulo;
-      controller.dispose();
+      controller?.dispose();
       controller = PageController(initialPage: 0);
     });
     salvarCapitulo();
   }
 
   void proximoCapitulo() {
-    int index = capitulos.indexOf(capituloAtual);
+    final index = capitulos.indexOf(capituloAtual);
     if (index < capitulos.length - 1) {
       mudarCapitulo(capitulos[index + 1]);
     }
   }
 
   void capituloAnterior() {
-    int index = capitulos.indexOf(capituloAtual);
+    final index = capitulos.indexOf(capituloAtual);
     if (index > 0) {
       mudarCapitulo(capitulos[index - 1]);
     }
   }
 
   Widget comentariosWidget() {
-    return Column(
-      children: [
-        const Divider(),
-        const Text(
-          'Comentários',
-          style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
-        ),
-        Padding(
-          padding: const EdgeInsets.all(8),
-          child: TextField(
-            controller: comentarioController,
-            decoration: InputDecoration(
-              hintText: 'Digite um comentário...',
-              suffixIcon: IconButton(
-                icon: const Icon(Icons.send),
-                onPressed: adicionarComentario,
+    final roxo = Theme.of(context).colorScheme.primary;
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+
+    return Container(
+      color: isDark ? const Color(0xFF140F1F) : Colors.white,
+      child: Column(
+        children: [
+          const SizedBox(height: 12),
+          Container(
+            width: 60,
+            height: 4,
+            decoration: BoxDecoration(
+              color: roxo.withOpacity(0.35),
+              borderRadius: BorderRadius.circular(999),
+            ),
+          ),
+          const SizedBox(height: 14),
+          Text(
+            'Comentários',
+            style: TextStyle(
+              fontSize: 19,
+              fontWeight: FontWeight.w800,
+              color: roxo,
+            ),
+          ),
+          Padding(
+            padding: const EdgeInsets.all(12),
+            child: TextField(
+              controller: comentarioController,
+              decoration: InputDecoration(
+                hintText: 'Digite um comentário...',
+                suffixIcon: IconButton(
+                  icon: Icon(Icons.send_rounded, color: roxo),
+                  onPressed: adicionarComentario,
+                ),
               ),
             ),
           ),
-        ),
-        ...comentarios.asMap().entries.map((entry) {
-          int index = entry.key;
-          String comentario = entry.value;
-          return ListTile(
-            title: Text(comentario),
-            trailing: Row(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                IconButton(
-                  icon: const Icon(Icons.edit),
-                  onPressed: () => editarComentario(index),
+          ...comentarios.asMap().entries.map((entry) {
+            final index = entry.key;
+            final comentario = entry.value;
+
+            return Container(
+              margin: const EdgeInsets.symmetric(horizontal: 12, vertical: 5),
+              decoration: BoxDecoration(
+                color: isDark
+                    ? const Color(0xFF20172C)
+                    : const Color(0xFFF7F2FF),
+                borderRadius: BorderRadius.circular(16),
+                border: Border.all(color: roxo.withOpacity(0.10)),
+              ),
+              child: ListTile(
+                title: Text(comentario),
+                trailing: Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    IconButton(
+                      icon: const Icon(Icons.edit_rounded),
+                      onPressed: () => editarComentario(index),
+                    ),
+                    IconButton(
+                      icon: const Icon(Icons.delete_rounded),
+                      onPressed: () => excluirComentario(index),
+                    ),
+                  ],
                 ),
-                IconButton(
-                  icon: const Icon(Icons.delete),
-                  onPressed: () => excluirComentario(index),
-                ),
-              ],
-            ),
-          );
-        }),
-      ],
+              ),
+            );
+          }),
+          const SizedBox(height: 18),
+        ],
+      ),
     );
   }
 
   @override
   Widget build(BuildContext context) {
-    List<String> paginas = getPaginas();
-    final bool isModoClaro = Theme.of(context).brightness == Brightness.light;
-    final Color textoBotao = isModoClaro ? Colors.black87 : Colors.white;
+    if (controller == null || capituloAtual.isEmpty) {
+      return const Scaffold(body: Center(child: CircularProgressIndicator()));
+    }
+
+    final paginas = getPaginas();
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+
+    // Roxo muda conforme o tema:
+    // light = mais escuro
+    // dark = mais claro
+    final Color roxoLeitura = isDark
+        ? const Color(0xFFB388FF)
+        : const Color(0xFF6D28D9);
 
     return Scaffold(
+      backgroundColor: isDark ? Colors.black : const Color(0xFFF7F4FB),
       appBar: AppBar(
-        leading: IconButton(
-          icon: const Icon(Icons.arrow_back),
+        backgroundColor: roxoLeitura,
+        foregroundColor: Colors.white,
+        elevation: 0,
+        leadingWidth: 120,
+        leading: TextButton.icon(
           onPressed: () => Navigator.pop(context),
+          icon: const Icon(Icons.arrow_back, color: Colors.white),
+          label: const Text('Anterior', style: TextStyle(color: Colors.white)),
         ),
-        title: Row(
-          children: [
-            TextButton(
-              onPressed: capituloAnterior,
-              child: Text('Anterior', style: TextStyle(color: textoBotao)),
-            ),
-            Expanded(
-              child: Center(
-                child: Text(capituloAtual, style: TextStyle(color: textoBotao)),
-              ),
-            ),
-          ],
+        title: Text(
+          capituloAtual,
+          style: const TextStyle(
+            color: Colors.white,
+            fontWeight: FontWeight.w700,
+          ),
+          overflow: TextOverflow.ellipsis,
         ),
+        centerTitle: true,
         actions: [
           IconButton(
-            icon: Icon(modoClique ? Icons.swipe : Icons.touch_app),
+            tooltip: modoClique ? 'Modo toque' : 'Modo rolagem',
+            icon: Icon(
+              modoClique ? Icons.swipe_rounded : Icons.touch_app_rounded,
+              color: Colors.white,
+            ),
             onPressed: () => setState(() => modoClique = !modoClique),
           ),
-          const SizedBox(width: 12),
           TextButton(
             onPressed: proximoCapitulo,
-            child: Row(
+            child: const Row(
               children: [
-                Text('Próximo', style: TextStyle(color: textoBotao)),
-                Icon(Icons.arrow_forward, color: textoBotao),
+                Text('Próximo', style: TextStyle(color: Colors.white)),
+                SizedBox(width: 2),
+                Icon(Icons.arrow_forward, color: Colors.white),
               ],
             ),
           ),
+          const SizedBox(width: 6),
         ],
       ),
       body: modoClique
           ? PageView.builder(
               key: ValueKey(capituloAtual),
               controller: controller,
-              itemCount: paginas.length + 1, // +1 para comentários
+              itemCount: paginas.length + 1,
               itemBuilder: (context, index) {
                 if (index < paginas.length) {
-                  // Páginas do capítulo
                   return GestureDetector(
                     onTapUp: (details) {
                       final largura = MediaQuery.of(context).size.width;
@@ -212,13 +281,12 @@ class _LeituraPageState extends State<LeituraPage> {
 
                       if (posicao > largura / 2) {
                         if (index < paginas.length - 1) {
-                          controller.nextPage(
+                          controller!.nextPage(
                             duration: const Duration(milliseconds: 300),
                             curve: Curves.easeInOut,
                           );
                         } else {
-                          // Última página -> ir para comentários
-                          controller.animateToPage(
+                          controller!.animateToPage(
                             paginas.length,
                             duration: const Duration(milliseconds: 300),
                             curve: Curves.easeInOut,
@@ -226,36 +294,44 @@ class _LeituraPageState extends State<LeituraPage> {
                         }
                       } else {
                         if (index > 0) {
-                          controller.previousPage(
+                          controller!.previousPage(
                             duration: const Duration(milliseconds: 300),
                             curve: Curves.easeInOut,
                           );
-                        } else {
-                          // Primeira página -> capítulo anterior
-                          if (capitulos.indexOf(capituloAtual) > 0) {
-                            capituloAnterior();
-                          }
+                        } else if (capitulos.indexOf(capituloAtual) > 0) {
+                          capituloAnterior();
                         }
                       }
                     },
-                    child: Center(
-                      child: InteractiveViewer(
-                        child: Image.asset(paginas[index], fit: BoxFit.contain),
+                    child: Container(
+                      color: isDark ? Colors.black : const Color(0xFFF2F2F2),
+                      child: Center(
+                        child: InteractiveViewer(
+                          minScale: 1,
+                          maxScale: 4,
+                          child: Image.asset(
+                            paginas[index],
+                            fit: BoxFit.contain,
+                            errorBuilder: (context, error, stackTrace) {
+                              return const Center(
+                                child: Text('Erro ao carregar página'),
+                              );
+                            },
+                          ),
+                        ),
                       ),
                     ),
                   );
                 } else {
-                  // Página de comentários
                   return GestureDetector(
                     onHorizontalDragEnd: (details) {
-                      if (details.primaryVelocity! < 0) {
+                      if ((details.primaryVelocity ?? 0) < 0) {
                         proximoCapitulo();
-                      } else if (details.primaryVelocity! > 0) {
+                      } else if ((details.primaryVelocity ?? 0) > 0) {
                         capituloAnterior();
                       }
                     },
                     onTapUp: (details) {
-                      // Clique na aba de comentários -> passa para o próximo capítulo
                       if (details.localPosition.dx >
                           MediaQuery.of(context).size.width / 2) {
                         proximoCapitulo();
@@ -272,12 +348,22 @@ class _LeituraPageState extends State<LeituraPage> {
               itemCount: paginas.length + 1,
               itemBuilder: (context, index) {
                 if (index < paginas.length) {
-                  return Padding(
-                    padding: const EdgeInsets.only(bottom: 10),
-                    child: Image.asset(
-                      paginas[index],
-                      width: double.infinity,
-                      fit: BoxFit.fitWidth,
+                  return Container(
+                    color: isDark ? Colors.black : const Color(0xFFF2F2F2),
+                    child: Padding(
+                      padding: const EdgeInsets.only(bottom: 10),
+                      child: Image.asset(
+                        paginas[index],
+                        width: double.infinity,
+                        fit: BoxFit.fitWidth,
+                        errorBuilder: (context, error, stackTrace) {
+                          return Container(
+                            height: 220,
+                            alignment: Alignment.center,
+                            child: const Text('Erro ao carregar página'),
+                          );
+                        },
+                      ),
                     ),
                   );
                 }

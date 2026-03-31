@@ -5,7 +5,7 @@ import '../services/favoritos_service.dart';
 class ObraCard extends StatefulWidget {
   final String titulo;
   final String descricao;
-  final VoidCallback? onFavoritoAlterado; // callback para sincronizar HomePage
+  final VoidCallback? onFavoritoAlterado;
 
   const ObraCard({
     super.key,
@@ -30,12 +30,13 @@ class _ObraCardState extends State<ObraCard> {
   @override
   void didUpdateWidget(covariant ObraCard oldWidget) {
     super.didUpdateWidget(oldWidget);
-    // Recarrega o favorito se o widget foi atualizado
     carregarFavorito();
   }
 
   Future<void> carregarFavorito() async {
     final favoritos = await FavoritosService.getFavoritos();
+    if (!mounted) return;
+
     setState(() {
       isFavorito = favoritos.contains(widget.titulo);
     });
@@ -43,13 +44,9 @@ class _ObraCardState extends State<ObraCard> {
 
   Future<void> toggleFavorito() async {
     await FavoritosService.toggleFavorito(widget.titulo);
-    // Atualiza o estado após alterar
     carregarFavorito();
 
-    // Notifica a HomePage para atualizar a lista
-    if (widget.onFavoritoAlterado != null) {
-      widget.onFavoritoAlterado!();
-    }
+    widget.onFavoritoAlterado?.call();
   }
 
   @override
@@ -68,35 +65,51 @@ class _ObraCardState extends State<ObraCard> {
         child: ListTile(
           contentPadding: const EdgeInsets.symmetric(
             horizontal: 12,
-            vertical: 10,
+            vertical: 8,
           ),
+
+          // 🔥 IMAGEM AJUSTADA (ANTES ERA 150)
           leading: ClipRRect(
             borderRadius: BorderRadius.circular(10),
             child: Image.asset(
               imagem,
-              width: 150,
-              height: 150,
-              fit: BoxFit.contain,
+              width: 90,
+              height: 60,
+              fit: BoxFit.cover,
             ),
           ),
+
+          // 🔥 TEXTO CONTROLADO (EVITA OVERFLOW)
           title: Text(
             widget.titulo,
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
             style: const TextStyle(fontWeight: FontWeight.bold),
           ),
-          subtitle: Text(widget.descricao),
+
+          subtitle: Text(
+            widget.descricao,
+            maxLines: 2,
+            overflow: TextOverflow.ellipsis,
+          ),
+
+          // 🔥 TRAILING MAIS COMPACTO
           trailing: Row(
             mainAxisSize: MainAxisSize.min,
             children: [
               IconButton(
+                visualDensity: VisualDensity.compact,
+                constraints: const BoxConstraints(minWidth: 36, minHeight: 36),
                 icon: Icon(
                   isFavorito ? Icons.favorite : Icons.favorite_border,
                   color: Colors.redAccent,
                 ),
                 onPressed: toggleFavorito,
               ),
-              const Icon(Icons.arrow_forward_ios),
+              const Icon(Icons.arrow_forward_ios, size: 18),
             ],
           ),
+
           onTap: () {
             Navigator.push(
               context,
@@ -104,10 +117,8 @@ class _ObraCardState extends State<ObraCard> {
                 builder: (_) => DetalhePage(titulo: widget.titulo),
               ),
             ).then((_) {
-              // Atualiza o favorito ao voltar da página de detalhe
               carregarFavorito();
-              if (widget.onFavoritoAlterado != null)
-                widget.onFavoritoAlterado!();
+              widget.onFavoritoAlterado?.call();
             });
           },
         ),
