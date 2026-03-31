@@ -68,18 +68,17 @@ class _ObraCardState extends State<ObraCard> {
             vertical: 8,
           ),
 
-          // 🔥 IMAGEM AJUSTADA (ANTES ERA 150)
+          //Imagem obra
           leading: ClipRRect(
             borderRadius: BorderRadius.circular(10),
             child: Image.asset(
               imagem,
-              width: 90,
+              width: 130,
               height: 60,
               fit: BoxFit.cover,
             ),
           ),
 
-          // 🔥 TEXTO CONTROLADO (EVITA OVERFLOW)
           title: Text(
             widget.titulo,
             maxLines: 1,
@@ -93,7 +92,6 @@ class _ObraCardState extends State<ObraCard> {
             overflow: TextOverflow.ellipsis,
           ),
 
-          // 🔥 TRAILING MAIS COMPACTO
           trailing: Row(
             mainAxisSize: MainAxisSize.min,
             children: [
