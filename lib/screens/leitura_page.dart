@@ -230,41 +230,65 @@ class _LeituraPageState extends State<LeituraPage> {
         backgroundColor: roxoLeitura,
         foregroundColor: Colors.white,
         elevation: 0,
-        leadingWidth: 120,
+
+        leadingWidth: 130,
         leading: TextButton.icon(
-          onPressed: () => Navigator.pop(context),
+          style: TextButton.styleFrom(padding: const EdgeInsets.only(left: 8)),
+          onPressed: () {
+            final index = capitulos.indexOf(capituloAtual);
+
+            if (index > 0) {
+              capituloAnterior();
+            } else {
+              Navigator.pop(context);
+            }
+          },
           icon: const Icon(Icons.arrow_back, color: Colors.white),
           label: const Text('Anterior', style: TextStyle(color: Colors.white)),
         ),
+
         title: Text(
           capituloAtual,
-          style: const TextStyle(
-            color: Colors.white,
-            fontWeight: FontWeight.w700,
-          ),
-          overflow: TextOverflow.ellipsis,
+          style: const TextStyle(fontWeight: FontWeight.w700),
         ),
         centerTitle: true,
+
         actions: [
+          const SizedBox(width: 12),
+
+          IconButton(
+            tooltip: 'Voltar para obra',
+            icon: const Icon(Icons.home_rounded),
+            onPressed: () => Navigator.pop(context),
+          ),
+
+          const SizedBox(width: 6),
+
+          // 🔁 MODO LEITURA
           IconButton(
             tooltip: modoClique ? 'Modo toque' : 'Modo rolagem',
             icon: Icon(
               modoClique ? Icons.swipe_rounded : Icons.touch_app_rounded,
-              color: Colors.white,
             ),
             onPressed: () => setState(() => modoClique = !modoClique),
           ),
-          TextButton(
-            onPressed: proximoCapitulo,
-            child: const Row(
-              children: [
-                Text('Próximo', style: TextStyle(color: Colors.white)),
-                SizedBox(width: 2),
-                Icon(Icons.arrow_forward, color: Colors.white),
-              ],
+
+          const SizedBox(width: 6),
+
+          // 👉 PRÓXIMO CAPÍTULO
+          Padding(
+            padding: const EdgeInsets.only(right: 6),
+            child: TextButton(
+              onPressed: proximoCapitulo,
+              child: const Row(
+                children: [
+                  Text('Próximo', style: TextStyle(color: Colors.white)),
+                  SizedBox(width: 4),
+                  Icon(Icons.arrow_forward, color: Colors.white),
+                ],
+              ),
             ),
           ),
-          const SizedBox(width: 6),
         ],
       ),
       body: modoClique

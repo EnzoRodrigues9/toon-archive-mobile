@@ -251,7 +251,11 @@ class _HomePageState extends State<HomePage> {
                           child: IconButton(
                             tooltip: 'Alternar tema',
                             onPressed: widget.alternarTema,
-                            icon: const Icon(Icons.dark_mode_rounded),
+                            icon: Icon(
+                              isDark
+                                  ? Icons.dark_mode_rounded
+                                  : Icons.light_mode_rounded,
+                            ),
                             color: Colors.white,
                           ),
                         ),
