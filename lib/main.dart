@@ -1,7 +1,15 @@
 import 'package:flutter/material.dart';
 import 'screens/home_page.dart';
+import 'routes/app_routes.dart';
+import 'package:firebase_core/firebase_core.dart';
+import 'firebase_options.dart';
 
-void main() {
+void main() async {
+  WidgetsFlutterBinding.ensureInitialized(); 
+   await Firebase.initializeApp(
+    options: DefaultFirebaseOptions.currentPlatform,
+  );            
+
   runApp(const ToonArchiveApp());
 }
 
@@ -24,6 +32,11 @@ class _ToonArchiveAppState extends State<ToonArchiveApp> {
   @override
   Widget build(BuildContext context) {
     return MaterialApp(
+      initialRoute: AppRoutes.login,
+      routes: {
+        ...AppRoutes.routes,
+        AppRoutes.home: (_) => HomePage(alternarTema: alternarTema),
+      },
       debugShowCheckedModeBanner: false,
       title: 'Toon Archive',
       themeMode: darkMode ? ThemeMode.dark : ThemeMode.light,
@@ -111,7 +124,6 @@ class _ToonArchiveAppState extends State<ToonArchiveApp> {
         ),
       ),
 
-      home: HomePage(alternarTema: alternarTema),
     );
   }
 }

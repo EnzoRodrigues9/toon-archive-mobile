@@ -627,7 +627,7 @@ class _HomePageState extends State<HomePage> {
                       : ListView.separated(
                           padding: const EdgeInsets.only(bottom: 14),
                           itemCount: obrasFiltradas.length,
-                          separatorBuilder: (_, __) =>
+                          separatorBuilder: (_, _) =>
                               const SizedBox(height: 12),
                           itemBuilder: (context, index) {
                             final obra = obrasFiltradas[index];

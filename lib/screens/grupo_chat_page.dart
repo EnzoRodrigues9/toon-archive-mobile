@@ -298,30 +298,41 @@ class _GrupoChatPageState extends State<GrupoChatPage> {
               ),
             ),
 
-            Padding(
-              padding: const EdgeInsets.fromLTRB(10, 0, 10, 10),
-              child: Row(
-                children: [
-                  Expanded(
-                    child: TextField(
-                      controller: controller,
-                      decoration: const InputDecoration(
-                        hintText: 'Digite sua mensagem...',
+            SafeArea(
+              top: false,
+              child: Padding(
+                padding: EdgeInsets.fromLTRB(
+                  10,
+                  0,
+                  10,
+                  MediaQuery.of(context).viewInsets.bottom + 10,
+                ),
+                child: Row(
+                  children: [
+                    Expanded(
+                      child: TextField(
+                        controller: controller,
+                        decoration: const InputDecoration(
+                          hintText: 'Digite sua mensagem...',
+                        ),
                       ),
                     ),
-                  ),
-                  const SizedBox(width: 8),
-                  Container(
-                    decoration: BoxDecoration(
-                      color: roxo,
-                      borderRadius: BorderRadius.circular(14),
+                    const SizedBox(width: 8),
+                    Container(
+                      decoration: BoxDecoration(
+                        color: roxo,
+                        borderRadius: BorderRadius.circular(14),
+                      ),
+                      child: IconButton(
+                        icon: const Icon(
+                          Icons.send_rounded,
+                          color: Colors.white,
+                        ),
+                        onPressed: enviarMensagem,
+                      ),
                     ),
-                    child: IconButton(
-                      icon: const Icon(Icons.send_rounded, color: Colors.white),
-                      onPressed: enviarMensagem,
-                    ),
-                  ),
-                ],
+                  ],
+                ),
               ),
             ),
           ],
