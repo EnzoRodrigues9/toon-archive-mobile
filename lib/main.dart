@@ -54,12 +54,12 @@ class _ToonArchiveAppState extends State<ToonArchiveApp> {
           foregroundColor: Colors.white, // 🔥 resolve texto preto
           elevation: 0,
         ),
-        cardTheme: CardThemeData(
+        cardTheme: const CardThemeData(
           color: Colors.white,
           elevation: 0,
           shape: RoundedRectangleBorder(
-            borderRadius: BorderRadius.circular(18),
-            side: const BorderSide(color: Color(0xFFE6D8FF)),
+            borderRadius: BorderRadius.all(Radius.circular(18)),
+            side: BorderSide(color: Color(0xFFE6D8FF)),
           ),
         ),
         inputDecorationTheme: InputDecorationTheme(
@@ -94,12 +94,12 @@ class _ToonArchiveAppState extends State<ToonArchiveApp> {
           centerTitle: true,
           elevation: 0,
         ),
-        cardTheme: CardThemeData(
+        cardTheme: const CardThemeData(
           color: const Color(0xFF20172C),
           elevation: 0,
           shape: RoundedRectangleBorder(
-            borderRadius: BorderRadius.circular(18),
-            side: const BorderSide(color: Color(0xFF3A2A55)),
+            borderRadius: BorderRadius.all(Radius.circular(18)),
+            side: BorderSide(color: Color(0xFF3A2A55)),
           ),
         ),
         inputDecorationTheme: InputDecorationTheme(
