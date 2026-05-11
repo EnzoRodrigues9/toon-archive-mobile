@@ -16,7 +16,7 @@ jobs:
       - name: Setup Flutter
         uses: subosito/flutter-action@v2
         with:
-          flutter-version: '3.22.3'
+        flutter-version: '3.41.6'
 
       - name: Install dependencies
         run: flutter pub get
@@ -31,3 +31,6 @@ jobs:
         uses: SonarSource/sonarqube-scan-action@master
         env:
           SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
+
+      - name: Flutter analyze strict
+        run: flutter analyze

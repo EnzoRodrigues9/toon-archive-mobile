@@ -5,10 +5,10 @@ import 'package:firebase_core/firebase_core.dart';
 import 'firebase_options.dart';
 
 void main() async {
-  WidgetsFlutterBinding.ensureInitialized(); 
-   await Firebase.initializeApp(
+  WidgetsFlutterBinding.ensureInitialized();
+  await Firebase.initializeApp(
     options: DefaultFirebaseOptions.currentPlatform,
-  );            
+  );
 
   runApp(const ToonArchiveApp());
 }
@@ -40,18 +40,15 @@ class _ToonArchiveAppState extends State<ToonArchiveApp> {
       debugShowCheckedModeBanner: false,
       title: 'Toon Archive',
       themeMode: darkMode ? ThemeMode.dark : ThemeMode.light,
-
       theme: ThemeData(
         useMaterial3: true,
         brightness: Brightness.light,
         scaffoldBackgroundColor: const Color(0xFFF6F2FF),
-
         colorScheme: const ColorScheme.light(
           primary: Color(0xFF8B5CF6), // 🔥 NOVO ROXO
           secondary: Color(0xFFC4B5FD),
           surface: Colors.white,
         ),
-
         appBarTheme: const AppBarTheme(
           backgroundColor: Color(0xFF8B5CF6),
           foregroundColor: Colors.white, // 🔥 resolve texto preto
@@ -82,7 +79,6 @@ class _ToonArchiveAppState extends State<ToonArchiveApp> {
           ),
         ),
       ),
-
       darkTheme: ThemeData(
         useMaterial3: true,
         brightness: Brightness.dark,
@@ -123,7 +119,6 @@ class _ToonArchiveAppState extends State<ToonArchiveApp> {
           ),
         ),
       ),
-
     );
   }
 }
