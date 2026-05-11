@@ -37,6 +37,13 @@
             {
               "client_id": "3019565963-4qfgir38vrtn4aeauk26fl0dip58d7ub.apps.googleusercontent.com",
               "client_type": 3
+            },
+            {
+              "client_id": "3019565963-g79mur7hj046ttu34i1acmaqjheif1mb.apps.googleusercontent.com",
+              "client_type": 2,
+              "ios_info": {
+                "bundle_id": "com.example.toonarchive"
+              }
             }
           ]
         }
