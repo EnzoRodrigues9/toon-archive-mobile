@@ -1,22 +1,33 @@
-name: Build
+name: SonarQube
+
 on:
   push:
     branches:
       - main
-  pull_request:
-    types: [opened, synchronize, reopened]
+
 jobs:
-  sonarqube:
-    name: SonarQube
+  sonar:
     runs-on: windows-latest
+
     steps:
-      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Flutter
+        uses: subosito/flutter-action@v2
         with:
-          fetch-depth: 0  # Shallow clones should be disabled for a better relevancy of analysis
-      # The analysis requires to retrieve dependencies and build successfully
-      - name: Build
-        run:  flutter pub get flutter build apk
-      - name: SonarQube Scan
-        uses: SonarSource/sonarqube-scan-action@fd88b7d7ccbaefd23d8f36f73b59db7a3d246602 # v6.0.0
+          flutter-version: '3.24.0'
+
+      - name: Install dependencies
+        run: flutter pub get
+
+      - name: Analyze project
+        run: flutter analyze
+
+      - name: Build APK
+        run: flutter build apk --debug
+
+      - name: Sonar Scan
+        uses: SonarSource/sonarqube-scan-action@master
         env:
           SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
