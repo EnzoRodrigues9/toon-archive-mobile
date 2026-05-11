@@ -208,7 +208,7 @@ class _DetalhePageState extends State<DetalhePage> {
               child: ListView.separated(
                 padding: const EdgeInsets.fromLTRB(12, 4, 12, 16),
                 itemCount: capitulos.length,
-                separatorBuilder: (_, _) => const SizedBox(height: 10),
+                separatorBuilder: (context, index) => const SizedBox(height: 10),
                 itemBuilder: (context, index) {
                   final capitulo = capitulos[index];
 

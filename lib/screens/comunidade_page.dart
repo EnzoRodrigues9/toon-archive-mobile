@@ -118,7 +118,7 @@ class ComunidadePage extends StatelessWidget {
               child: ListView.separated(
                 padding: const EdgeInsets.fromLTRB(14, 10, 14, 16),
                 itemCount: grupos.length,
-                separatorBuilder: (_, _) => const SizedBox(height: 12),
+                separatorBuilder: (context, index) => const SizedBox(height: 12),
                 itemBuilder: (context, index) {
                   final grupo = grupos[index];
 
