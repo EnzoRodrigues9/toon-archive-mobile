@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
+import 'package:connectivity_plus/connectivity_plus.dart';
 
 import '../repositories/progresso_repository.dart';
 import '../repositories/paginas_repository.dart';
@@ -33,6 +34,7 @@ class LeituraPage extends StatefulWidget {
 class _LeituraPageState extends State<LeituraPage> with WidgetsBindingObserver {
   bool _disposed = false;
   bool modoClique = false;
+  bool _modoOffline = false;
 
   PageController? controller;
 
@@ -97,6 +99,11 @@ class _LeituraPageState extends State<LeituraPage> with WidgetsBindingObserver {
     setState(fn);
   }
 
+  Future<bool> _online() async {
+    final result = await Connectivity().checkConnectivity();
+    return result.any((r) => r != ConnectivityResult.none);
+  }
+
   Future<void> _inicializar() async {
     final usuario = await _authService.getUsuarioInterno();
     if (_disposed) return;
@@ -104,12 +111,16 @@ class _LeituraPageState extends State<LeituraPage> with WidgetsBindingObserver {
     _usuarioId = usuario?.id;
     _obraId = widget.obraId;
 
+    final online = await _online();
+    _modoOffline = !online;
+
     await _carregarPaginas();
     if (_disposed) return;
     await _carregarCapitulos();
     if (_disposed) return;
     await _carregarProgresso();
-    await _carregarComentarios();
+    // Comentários só carregam online; offline mostra aviso
+    if (online) await _carregarComentarios();
   }
 
   Future<void> _carregarPaginas() async {
@@ -530,7 +541,21 @@ class _LeituraPageState extends State<LeituraPage> with WidgetsBindingObserver {
         // Campo de novo comentário
         Padding(
           padding: const EdgeInsets.symmetric(horizontal: 12),
-          child: TextField(
+          child: _modoOffline
+              ? Container(
+                  padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
+                  decoration: BoxDecoration(
+                    color: isDark ? const Color(0xFF231840) : const Color(0xFFF5F3FF),
+                    borderRadius: BorderRadius.circular(14),
+                  ),
+                  child: Row(children: [
+                    Icon(Icons.wifi_off_rounded, size: 16, color: isDark ? Colors.white38 : Colors.black38),
+                    const SizedBox(width: 8),
+                    Text('Sem conexão para comentar',
+                        style: TextStyle(color: isDark ? Colors.white38 : Colors.black38, fontSize: 13)),
+                  ]),
+                )
+              : TextField(
             controller: comentarioController,
             style: TextStyle(color: isDark ? Colors.white : Colors.black87),
             maxLines: null,
@@ -571,6 +596,18 @@ class _LeituraPageState extends State<LeituraPage> with WidgetsBindingObserver {
           Padding(
             padding: const EdgeInsets.all(24),
             child: CircularProgressIndicator(color: roxo),
+          )
+        else if (_modoOffline)
+          Padding(
+            padding: const EdgeInsets.all(24),
+            child: Row(mainAxisAlignment: MainAxisAlignment.center, children: [
+              Icon(Icons.wifi_off_rounded, color: isDark ? Colors.white38 : Colors.black38, size: 18),
+              const SizedBox(width: 8),
+              Text(
+                'Comentários indisponíveis offline.',
+                style: TextStyle(color: isDark ? Colors.white38 : Colors.black38),
+              ),
+            ]),
           )
         else if (_comentarios.isEmpty)
           Padding(

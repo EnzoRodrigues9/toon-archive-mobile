@@ -131,6 +131,6 @@ class ObrasRepository {
 
   Future<bool> _online() async {
     final result = await Connectivity().checkConnectivity();
-    return result != ConnectivityResult.none;
+    return result.any((r) => r != ConnectivityResult.none);
   }
 }

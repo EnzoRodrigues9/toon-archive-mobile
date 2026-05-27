@@ -173,6 +173,6 @@ class ProgressoRepository {
 
   Future<bool> _online() async {
     final r = await Connectivity().checkConnectivity();
-    return r != ConnectivityResult.none;
+    return r.any((r) => r != ConnectivityResult.none);
   }
 }
