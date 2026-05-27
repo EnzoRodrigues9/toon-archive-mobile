@@ -176,8 +176,7 @@ class AuthService {
   }
 
   bool get estaLogado =>
-      _supabase.auth.currentUser != null ||
-      _firebaseAuth.currentUser != null;
+      _supabase.auth.currentUser != null || _firebaseAuth.currentUser != null;
 
   // ──────────────────────────────────────────────────────────
   // PERSISTÊNCIA INTERNA
@@ -199,7 +198,21 @@ class AuthService {
     final email = supabaseUser.email ?? '';
     final avatarUrl = supabaseUser.userMetadata?['avatar_url'] as String?;
 
-    final rows = await db.query(
+    // ── Busca role atual no Supabase antes de qualquer coisa ──
+    String roleAtual = 'leitor';
+    try {
+      final rows = await _supabase
+          .from('usuarios')
+          .select('role')
+          .eq('id', supabaseUser.id)
+          .limit(1);
+      if (rows.isNotEmpty) {
+        roleAtual = rows.first['role'] as String? ?? 'leitor';
+      }
+    } catch (_) {}
+
+    // ── SQLite ────────────────────────────────────────────────
+    final localRows = await db.query(
       'usuarios',
       where: 'id = ?',
       whereArgs: [supabaseUser.id],
@@ -207,16 +220,18 @@ class AuthService {
 
     final Usuario usuario;
 
-    if (rows.isNotEmpty) {
-      usuario = Usuario.fromMap(rows.first).copyWith(
+    if (localRows.isNotEmpty) {
+      usuario = Usuario.fromMap(localRows.first).copyWith(
         nome: nome,
         avatarUrl: avatarUrl,
+        role: roleAtual, // <-- preserva o role real
       );
       await db.update(
         'usuarios',
         {
           'nome': usuario.nome,
           'avatar_url': usuario.avatarUrl,
+          'role': roleAtual, // <-- atualiza localmente também
           'atualizado_em': agora.toIso8601String(),
         },
         'id = ?',
@@ -228,7 +243,7 @@ class AuthService {
         nome: nome,
         email: email,
         avatarUrl: avatarUrl,
-        role: 'leitor',
+        role: roleAtual, // <-- usa o role do Supabase
         ativo: true,
         criadoEm: agora,
         atualizadoEm: agora,
@@ -236,7 +251,19 @@ class AuthService {
       await db.insert('usuarios', usuario.toMap());
     }
 
-    await _upsertUsuarioSupabase(usuario);
+    // Upsert sem sobrescrever o role
+    try {
+      await _supabase.from('usuarios').upsert({
+        'id': usuario.id,
+        'nome': usuario.nome,
+        'email': email,
+        'avatar_url': avatarUrl,
+        'atualizado_em': agora.toIso8601String(),
+        // role NÃO incluído — não sobrescreve
+      }, onConflict: 'id');
+    } catch (e) {
+      debugPrint('Supabase upsert usuario falhou: $e');
+    }
 
     return usuario;
   }
@@ -289,7 +316,15 @@ class AuthService {
 
   Future<void> _upsertUsuarioSupabase(Usuario usuario) async {
     try {
-      await _supabase.from('usuarios').upsert(usuario.toSupabase());
+      // ANTES: sobrescrevia o role
+      // await _supabase.from('usuarios').upsert(usuario.toSupabase());
+
+      // DEPOIS: usa upsert mas ignora o role (não sobrescreve)
+      await _supabase.from('usuarios').upsert(
+            usuario.toSupabase(),
+            onConflict: 'id',
+            ignoreDuplicates: false,
+          );
     } catch (e) {
       debugPrint('Supabase upsert usuario falhou: $e');
     }
