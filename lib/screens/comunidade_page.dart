@@ -64,16 +64,16 @@ class _ComunidadePageState extends State<ComunidadePage> {
 
   IconData _resolverIcone(String nome) {
     const mapa = {
-      'groups':                Icons.groups_rounded,
-      'auto_stories':          Icons.auto_stories_rounded,
+      'groups': Icons.groups_rounded,
+      'auto_stories': Icons.auto_stories_rounded,
       'local_fire_department': Icons.local_fire_department_rounded,
-      'flash_on':              Icons.flash_on_rounded,
-      'shield':                Icons.shield_rounded,
-      'sailing':               Icons.sailing_rounded,
-      'star':                  Icons.star_rounded,
-      'favorite':              Icons.favorite_rounded,
-      'sports_martial_arts':   Icons.sports_martial_arts_rounded,
-      'movie':                 Icons.movie_rounded,
+      'flash_on': Icons.flash_on_rounded,
+      'shield': Icons.shield_rounded,
+      'sailing': Icons.sailing_rounded,
+      'star': Icons.star_rounded,
+      'favorite': Icons.favorite_rounded,
+      'sports_martial_arts': Icons.sports_martial_arts_rounded,
+      'movie': Icons.movie_rounded,
     };
     return mapa[nome] ?? Icons.groups_rounded;
   }
@@ -95,15 +95,13 @@ class _ComunidadePageState extends State<ComunidadePage> {
       builder: (ctx) => StatefulBuilder(
         builder: (ctx, setDialogState) {
           final isDark = Theme.of(ctx).brightness == Brightness.dark;
-          final roxo = isDark
-              ? const Color(0xFF9F67FA)
-              : const Color(0xFF7C3AED);
+          final roxo =
+              isDark ? const Color(0xFF9F67FA) : const Color(0xFF7C3AED);
 
           return AlertDialog(
-            backgroundColor:
-                isDark ? const Color(0xFF1A1030) : Colors.white,
-            shape: RoundedRectangleBorder(
-                borderRadius: BorderRadius.circular(20)),
+            backgroundColor: isDark ? const Color(0xFF1A1030) : Colors.white,
+            shape:
+                RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
             title: Text('Criar grupo',
                 style: TextStyle(
                     fontWeight: FontWeight.w800,
@@ -117,14 +115,11 @@ class _ComunidadePageState extends State<ComunidadePage> {
                   TextField(
                     controller: nomeController,
                     style: TextStyle(
-                        color:
-                            isDark ? Colors.white : Colors.black87),
+                        color: isDark ? Colors.white : Colors.black87),
                     decoration: InputDecoration(
                       labelText: 'Nome do grupo *',
                       labelStyle: TextStyle(
-                          color: isDark
-                              ? Colors.white54
-                              : Colors.black45),
+                          color: isDark ? Colors.white54 : Colors.black45),
                       filled: true,
                       fillColor: isDark
                           ? const Color(0xFF231840)
@@ -134,8 +129,7 @@ class _ComunidadePageState extends State<ComunidadePage> {
                           borderSide: BorderSide.none),
                       focusedBorder: OutlineInputBorder(
                           borderRadius: BorderRadius.circular(12),
-                          borderSide:
-                              BorderSide(color: roxo, width: 1.2)),
+                          borderSide: BorderSide(color: roxo, width: 1.2)),
                     ),
                   ),
                   const SizedBox(height: 12),
@@ -143,15 +137,12 @@ class _ComunidadePageState extends State<ComunidadePage> {
                   TextField(
                     controller: descController,
                     style: TextStyle(
-                        color:
-                            isDark ? Colors.white : Colors.black87),
+                        color: isDark ? Colors.white : Colors.black87),
                     maxLines: 2,
                     decoration: InputDecoration(
                       labelText: 'Descrição',
                       labelStyle: TextStyle(
-                          color: isDark
-                              ? Colors.white54
-                              : Colors.black45),
+                          color: isDark ? Colors.white54 : Colors.black45),
                       filled: true,
                       fillColor: isDark
                           ? const Color(0xFF231840)
@@ -161,8 +152,7 @@ class _ComunidadePageState extends State<ComunidadePage> {
                           borderSide: BorderSide.none),
                       focusedBorder: OutlineInputBorder(
                           borderRadius: BorderRadius.circular(12),
-                          borderSide:
-                              BorderSide(color: roxo, width: 1.2)),
+                          borderSide: BorderSide(color: roxo, width: 1.2)),
                     ),
                   ),
                   const SizedBox(height: 16),
@@ -171,9 +161,7 @@ class _ComunidadePageState extends State<ComunidadePage> {
                       style: TextStyle(
                           fontSize: 13,
                           fontWeight: FontWeight.w600,
-                          color: isDark
-                              ? Colors.white54
-                              : Colors.black45)),
+                          color: isDark ? Colors.white54 : Colors.black45)),
                   const SizedBox(height: 8),
                   Wrap(
                     spacing: 8,
@@ -181,26 +169,20 @@ class _ComunidadePageState extends State<ComunidadePage> {
                     children: _icones.map((ic) {
                       final selecionado = iconeEscolhido == ic;
                       return GestureDetector(
-                        onTap: () =>
-                            setDialogState(() => iconeEscolhido = ic),
+                        onTap: () => setDialogState(() => iconeEscolhido = ic),
                         child: Container(
                           padding: const EdgeInsets.all(10),
                           decoration: BoxDecoration(
-                            color: selecionado
-                                ? roxo
-                                : roxo.withOpacity(0.10),
+                            color: selecionado ? roxo : roxo.withOpacity(0.10),
                             borderRadius: BorderRadius.circular(12),
                             border: Border.all(
-                              color: selecionado
-                                  ? roxo
-                                  : roxo.withOpacity(0.20),
+                              color:
+                                  selecionado ? roxo : roxo.withOpacity(0.20),
                             ),
                           ),
                           child: Icon(
                             _resolverIcone(ic),
-                            color: selecionado
-                                ? Colors.white
-                                : roxo,
+                            color: selecionado ? Colors.white : roxo,
                             size: 22,
                           ),
                         ),
@@ -244,11 +226,11 @@ class _ComunidadePageState extends State<ComunidadePage> {
 
     try {
       await _supabase.from('grupos').insert({
-        'nome':       nome,
-        'descricao':  descController.text.trim().isEmpty
+        'nome': nome,
+        'descricao': descController.text.trim().isEmpty
             ? null
             : descController.text.trim(),
-        'icone':      iconeEscolhido,
+        'icone': iconeEscolhido,
         'criador_id': _usuario!.id,
       });
       await _carregarGrupos();
@@ -296,10 +278,7 @@ class _ComunidadePageState extends State<ComunidadePage> {
           .delete()
           .eq('grupo', grupo['nome']);
       // Remove o grupo
-      await _supabase
-          .from('grupos')
-          .delete()
-          .eq('id', grupo['id']);
+      await _supabase.from('grupos').delete().eq('id', grupo['id']);
 
       await _carregarGrupos();
       if (!mounted) return;
@@ -331,19 +310,12 @@ class _ComunidadePageState extends State<ComunidadePage> {
             decoration: BoxDecoration(
               gradient: LinearGradient(
                 colors: isDark
-                    ? [
-                        const Color(0xFF1A1030),
-                        const Color(0xFF2D1B5E)
-                      ]
-                    : [
-                        const Color(0xFF7C3AED),
-                        const Color(0xFF9F67FA)
-                      ],
+                    ? [const Color(0xFF1A1030), const Color(0xFF2D1B5E)]
+                    : [const Color(0xFF7C3AED), const Color(0xFF9F67FA)],
               ),
             ),
             child: Row(children: [
-              const Icon(Icons.groups_rounded,
-                  color: Colors.white, size: 26),
+              const Icon(Icons.groups_rounded, color: Colors.white, size: 26),
               const SizedBox(width: 10),
               const Expanded(
                 child: Column(
@@ -355,8 +327,8 @@ class _ComunidadePageState extends State<ComunidadePage> {
                               fontSize: 18,
                               fontWeight: FontWeight.w900)),
                       Text('Converse com outros fãs',
-                          style: TextStyle(
-                              color: Colors.white60, fontSize: 11)),
+                          style:
+                              TextStyle(color: Colors.white60, fontSize: 11)),
                     ]),
               ),
               // Botão criar grupo
@@ -367,8 +339,7 @@ class _ComunidadePageState extends State<ComunidadePage> {
                   decoration: BoxDecoration(
                     color: Colors.white.withOpacity(0.15),
                     shape: BoxShape.circle,
-                    border: Border.all(
-                        color: Colors.white.withOpacity(0.3)),
+                    border: Border.all(color: Colors.white.withOpacity(0.3)),
                   ),
                   child: const Icon(Icons.add_rounded,
                       color: Colors.white, size: 22),
@@ -389,8 +360,7 @@ class _ComunidadePageState extends State<ComunidadePage> {
                             mainAxisSize: MainAxisSize.min,
                             children: [
                               Icon(Icons.groups_rounded,
-                                  size: 64,
-                                  color: roxo.withOpacity(0.3)),
+                                  size: 64, color: roxo.withOpacity(0.3)),
                               const SizedBox(height: 16),
                               Text('Nenhum grupo ainda',
                                   style: TextStyle(
@@ -422,34 +392,30 @@ class _ComunidadePageState extends State<ComunidadePage> {
                               const SizedBox(height: 10),
                           itemBuilder: (_, i) {
                             final g = _grupos[i];
-                            final eCriador =
-                                g['criador_id'] == _usuario?.id;
+                            final eCriador = g['criador_id'] == _usuario?.id ||
+                                _usuario?.role == 'admin';
 
                             return Container(
                               decoration: BoxDecoration(
                                 color: card,
-                                borderRadius:
-                                    BorderRadius.circular(20),
-                                border: Border.all(
-                                    color: roxo.withOpacity(0.12)),
+                                borderRadius: BorderRadius.circular(20),
+                                border:
+                                    Border.all(color: roxo.withOpacity(0.12)),
                                 boxShadow: [
                                   BoxShadow(
                                       color: Colors.black
-                                          .withOpacity(isDark
-                                              ? 0.14
-                                              : 0.05),
+                                          .withOpacity(isDark ? 0.14 : 0.05),
                                       blurRadius: 10,
                                       offset: const Offset(0, 3))
                                 ],
                               ),
                               child: InkWell(
-                                borderRadius:
-                                    BorderRadius.circular(20),
+                                borderRadius: BorderRadius.circular(20),
                                 onTap: () => Navigator.push(
                                   context,
                                   MaterialPageRoute(
-                                    builder: (_) => GrupoChatPage(
-                                        nomeGrupo: g['nome']),
+                                    builder: (_) =>
+                                        GrupoChatPage(nomeGrupo: g['nome']),
                                   ),
                                 ).then((_) => _carregarGrupos()),
                                 child: Padding(
@@ -460,17 +426,14 @@ class _ComunidadePageState extends State<ComunidadePage> {
                                       width: 56,
                                       height: 56,
                                       decoration: BoxDecoration(
-                                        borderRadius:
-                                            BorderRadius.circular(16),
-                                        gradient: LinearGradient(
-                                            colors: [
-                                              roxo,
-                                              const Color(0xFF9F67FA)
-                                            ]),
+                                        borderRadius: BorderRadius.circular(16),
+                                        gradient: LinearGradient(colors: [
+                                          roxo,
+                                          const Color(0xFF9F67FA)
+                                        ]),
                                       ),
                                       child: Icon(
-                                        _resolverIcone(
-                                            g['icone'] ?? 'groups'),
+                                        _resolverIcone(g['icone'] ?? 'groups'),
                                         color: Colors.white,
                                         size: 26,
                                       ),
@@ -488,34 +451,30 @@ class _ComunidadePageState extends State<ComunidadePage> {
                                                 g['nome'],
                                                 style: TextStyle(
                                                     fontSize: 16,
-                                                    fontWeight:
-                                                        FontWeight.w800,
+                                                    fontWeight: FontWeight.w800,
                                                     color: isDark
                                                         ? Colors.white
-                                                        : Colors
-                                                            .black87),
+                                                        : Colors.black87),
                                               ),
                                             ),
                                             // Badge "meu grupo"
                                             if (eCriador)
                                               Container(
-                                                padding: const EdgeInsets
-                                                    .symmetric(
-                                                    horizontal: 8,
-                                                    vertical: 3),
+                                                padding:
+                                                    const EdgeInsets.symmetric(
+                                                        horizontal: 8,
+                                                        vertical: 3),
                                                 decoration: BoxDecoration(
-                                                  color: roxo
-                                                      .withOpacity(0.12),
+                                                  color: roxo.withOpacity(0.12),
                                                   borderRadius:
-                                                      BorderRadius
-                                                          .circular(999),
+                                                      BorderRadius.circular(
+                                                          999),
                                                 ),
                                                 child: Text('Meu grupo',
                                                     style: TextStyle(
                                                         fontSize: 10,
                                                         fontWeight:
-                                                            FontWeight
-                                                                .w700,
+                                                            FontWeight.w700,
                                                         color: roxo)),
                                               ),
                                           ]),
@@ -527,8 +486,7 @@ class _ComunidadePageState extends State<ComunidadePage> {
                                             Text(
                                               g['descricao'],
                                               maxLines: 2,
-                                              overflow:
-                                                  TextOverflow.ellipsis,
+                                              overflow: TextOverflow.ellipsis,
                                               style: TextStyle(
                                                   fontSize: 12,
                                                   color: isDark
@@ -544,16 +502,12 @@ class _ComunidadePageState extends State<ComunidadePage> {
                                     const SizedBox(width: 8),
                                     if (eCriador)
                                       IconButton(
-                                        icon: const Icon(
-                                            Icons.delete_rounded,
-                                            color: Colors.redAccent,
-                                            size: 20),
-                                        onPressed: () =>
-                                            _excluirGrupo(g),
+                                        icon: const Icon(Icons.delete_rounded,
+                                            color: Colors.redAccent, size: 20),
+                                        onPressed: () => _excluirGrupo(g),
                                       )
                                     else
-                                      Icon(
-                                          Icons.chevron_right_rounded,
+                                      Icon(Icons.chevron_right_rounded,
                                           color: roxo.withOpacity(0.5)),
                                   ]),
                                 ),

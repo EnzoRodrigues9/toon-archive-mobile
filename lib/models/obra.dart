@@ -5,6 +5,7 @@ class Obra {
   final String? genero;
   final String status;
   final String? capaUrl;
+  final String? bannerUrl; // <-- novo
   final String? autor;
   final int totalCapitulos;
   final bool destaque;
@@ -18,6 +19,7 @@ class Obra {
     this.genero,
     this.status = 'em_andamento',
     this.capaUrl,
+    this.bannerUrl, // <-- novo
     this.autor,
     this.totalCapitulos = 0,
     this.destaque = false,
@@ -25,19 +27,19 @@ class Obra {
     required this.atualizadoEm,
   });
 
-  // ── SQLite ──────────────────────────────────────────────────
   factory Obra.fromMap(Map<String, dynamic> map) => Obra(
-    id:              map['id'] as String,
-    titulo:          map['titulo'] as String,
-    descricao:       map['descricao'] as String?,
-    genero:          map['genero'] as String?,
-    status:          map['status'] as String? ?? 'em_andamento',
-    capaUrl:         map['capa_url'] as String?,
-    autor:           map['autor'] as String?,
-    totalCapitulos:  map['total_capitulos'] as int? ?? 0,
-    destaque:        (map['destaque'] as int? ?? 0) == 1,
-    criadoEm:        DateTime.parse(map['criado_em'] as String),
-    atualizadoEm:    DateTime.parse(map['atualizado_em'] as String),
+    id:             map['id'] as String,
+    titulo:         map['titulo'] as String,
+    descricao:      map['descricao'] as String?,
+    genero:         map['genero'] as String?,
+    status:         map['status'] as String? ?? 'em_andamento',
+    capaUrl:        map['capa_url'] as String?,
+    bannerUrl:      map['banner_url'] as String?, // <-- novo
+    autor:          map['autor'] as String?,
+    totalCapitulos: map['total_capitulos'] as int? ?? 0,
+    destaque:       (map['destaque'] as int? ?? 0) == 1,
+    criadoEm:       DateTime.parse(map['criado_em'] as String),
+    atualizadoEm:   DateTime.parse(map['atualizado_em'] as String),
   );
 
   Map<String, dynamic> toMap() => {
@@ -47,6 +49,7 @@ class Obra {
     'genero':          genero,
     'status':          status,
     'capa_url':        capaUrl,
+    'banner_url':      bannerUrl, // <-- novo
     'autor':           autor,
     'total_capitulos': totalCapitulos,
     'destaque':        destaque ? 1 : 0,
@@ -54,19 +57,19 @@ class Obra {
     'atualizado_em':   atualizadoEm.toIso8601String(),
   };
 
-  // ── Supabase ─────────────────────────────────────────────────
   factory Obra.fromSupabase(Map<String, dynamic> map) => Obra(
-    id:              map['id'] as String,
-    titulo:          map['titulo'] as String,
-    descricao:       map['descricao'] as String?,
-    genero:          map['genero'] as String?,
-    status:          map['status'] as String? ?? 'em_andamento',
-    capaUrl:         map['capa_url'] as String?,
-    autor:           map['autor'] as String?,
-    totalCapitulos:  map['total_capitulos'] as int? ?? 0,
-    destaque:        map['destaque'] as bool? ?? false,
-    criadoEm:        DateTime.parse(map['criado_em'] as String),
-    atualizadoEm:    DateTime.parse(map['atualizado_em'] as String),
+    id:             map['id'] as String,
+    titulo:         map['titulo'] as String,
+    descricao:      map['descricao'] as String?,
+    genero:         map['genero'] as String?,
+    status:         map['status'] as String? ?? 'em_andamento',
+    capaUrl:        map['capa_url'] as String?,
+    bannerUrl:      map['banner_url'] as String?, // <-- novo
+    autor:          map['autor'] as String?,
+    totalCapitulos: map['total_capitulos'] as int? ?? 0,
+    destaque:       map['destaque'] as bool? ?? false,
+    criadoEm:       DateTime.parse(map['criado_em'] as String),
+    atualizadoEm:   DateTime.parse(map['atualizado_em'] as String),
   );
 
   Map<String, dynamic> toSupabase() => {
@@ -76,6 +79,7 @@ class Obra {
     'genero':          genero,
     'status':          status,
     'capa_url':        capaUrl,
+    'banner_url':      bannerUrl, // <-- novo
     'autor':           autor,
     'total_capitulos': totalCapitulos,
     'destaque':        destaque,

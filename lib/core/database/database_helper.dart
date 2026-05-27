@@ -19,8 +19,9 @@ class DatabaseHelper {
 
     return await openDatabase(
       path,
-      version: 2,
+      version: 3,
       onCreate: _onCreate,
+      onUpgrade: _onUpgrade,
       onOpen: _onOpen,
     );
   }
@@ -31,21 +32,23 @@ class DatabaseHelper {
       CREATE TABLE IF NOT EXISTS generos (
         id TEXT PRIMARY KEY,
         nome TEXT NOT NULL UNIQUE,
-        categoria TEXT NOT NULL
-                   CHECK (categoria IN ('demografico','narrativo','tipo'))
+        categoria TEXT NOT NULL CHECK (categoria IN ('demografico','narrativo','tipo'))
       )
     ''');
       await db.execute('''
       CREATE TABLE IF NOT EXISTS obra_generos (
-        obra_id   TEXT NOT NULL REFERENCES obras(id)   ON DELETE CASCADE,
+        obra_id   TEXT NOT NULL REFERENCES obras(id) ON DELETE CASCADE,
         genero_id TEXT NOT NULL REFERENCES generos(id) ON DELETE CASCADE,
         PRIMARY KEY (obra_id, genero_id)
       )
     ''');
       await db.execute(
-          'CREATE INDEX IF NOT EXISTS idx_obra_generos_obra   ON obra_generos(obra_id)');
+          'CREATE INDEX IF NOT EXISTS idx_obra_generos_obra ON obra_generos(obra_id)');
       await db.execute(
           'CREATE INDEX IF NOT EXISTS idx_obra_generos_genero ON obra_generos(genero_id)');
+    }
+    if (oldVersion < 3) {
+      await db.execute('ALTER TABLE obras ADD COLUMN banner_url TEXT');
     }
   }
 
@@ -82,21 +85,22 @@ class DatabaseHelper {
 
         // ── obras ─────────────────────────────────────────────────
         '''
-    CREATE TABLE IF NOT EXISTS obras (
-      id              TEXT PRIMARY KEY,
-      titulo          TEXT UNIQUE NOT NULL,
-      descricao       TEXT,
-      genero          TEXT,
-      status          TEXT NOT NULL DEFAULT 'em_andamento'
-                      CHECK (status IN ('em_andamento','completa','hiato','cancelada')),
-      capa_url        TEXT,
-      autor           TEXT,
-      total_capitulos INTEGER NOT NULL DEFAULT 0 CHECK (total_capitulos >= 0),
-      destaque        INTEGER NOT NULL DEFAULT 0 CHECK (destaque IN (0, 1)),
-      criado_em       TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
-      atualizado_em   TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
-    )
-    ''',
+CREATE TABLE IF NOT EXISTS obras (
+  id              TEXT PRIMARY KEY,
+  titulo          TEXT UNIQUE NOT NULL,
+  descricao       TEXT,
+  genero          TEXT,
+  status          TEXT NOT NULL DEFAULT 'em_andamento'
+                  CHECK (status IN ('em_andamento','completa','hiato','cancelada')),
+  capa_url        TEXT,
+  banner_url      TEXT, 
+  autor           TEXT,
+  total_capitulos INTEGER NOT NULL DEFAULT 0 CHECK (total_capitulos >= 0),
+  destaque        INTEGER NOT NULL DEFAULT 0 CHECK (destaque IN (0, 1)),
+  criado_em       TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  atualizado_em   TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+)
+''',
 
         // ── capitulos ─────────────────────────────────────────────
         '''

@@ -3,10 +3,12 @@ import '../repositories/favoritos_repository.dart';
 import '../repositories/downloads_repository.dart';
 import '../repositories/capitulos_repository.dart';
 import '../repositories/paginas_repository.dart';
+import '../repositories/obras_repository.dart';
+import '../repositories/generos_repository.dart';
 import '../services/auth_service.dart';
 import '../services/download_service.dart';
 import '../models/capitulo.dart';
-import '../repositories/generos_repository.dart';
+import '../models/obra.dart';
 import '../models/genero.dart';
 import 'dart:io';
 
@@ -21,16 +23,12 @@ class DetalhePage extends StatefulWidget {
 class _DetalhePageState extends State<DetalhePage> {
   bool _isFavorito = false, _carregando = true, _carregandoCaps = true;
   String? _usuarioId;
-  // true = crescente (cap 1 → N), false = decrescente
   bool _ordemCrescente = true;
+  bool _descricaoExpandida = false;
 
-  List<Genero> _generos = [];
-  final _generosRepo = GenerosRepository.instance;
-
-  // Lista SEMPRE ordenada de forma canônica (crescente).
-  // A exibição inverte conforme _ordemCrescente, mas a ordem real
-  // nunca é alterada para não quebrar a navegação.
+  Obra? _obra;
   List<Capitulo> _capitulos = [];
+  List<Genero> _generos = [];
 
   final Map<String, bool> _downloadsConcluidos = {};
   final Map<String, bool> _baixando = {};
@@ -40,6 +38,8 @@ class _DetalhePageState extends State<DetalhePage> {
   final _downloadsRepo = DownloadsRepository.instance;
   final _capitulosRepo = CapitulosRepository.instance;
   final _paginasRepo = PaginasRepository.instance;
+  final _obrasRepo = ObrasRepository.instance;
+  final _generosRepo = GenerosRepository.instance;
   final _downloadService = DownloadService.instance;
   final _authService = AuthService();
 
@@ -53,8 +53,18 @@ class _DetalhePageState extends State<DetalhePage> {
     final u = await _authService.getUsuarioInterno();
     if (!mounted) return;
     _usuarioId = u?.id;
-    await Future.wait(
-        [_carregarFavorito(), _carregarCapitulos(), _carregarGeneros()]);
+    await Future.wait([
+      _carregarObra(),
+      _carregarFavorito(),
+      _carregarCapitulos(),
+      _carregarGeneros(),
+    ]);
+  }
+
+  Future<void> _carregarObra() async {
+    final obra = await _obrasRepo.buscarPorId(widget.obraId);
+    if (!mounted) return;
+    setState(() => _obra = obra);
   }
 
   Future<void> _carregarGeneros() async {
@@ -80,10 +90,7 @@ class _DetalhePageState extends State<DetalhePage> {
     setState(() => _carregandoCaps = true);
     final lista = await _capitulosRepo.listarPorObra(widget.obraId);
     if (!mounted) return;
-
-    // Ordem canônica SEMPRE crescente
     lista.sort((a, b) => a.numero.compareTo(b.numero));
-
     if (_usuarioId != null) {
       for (final c in lista) {
         _downloadsConcluidos[c.id] =
@@ -97,7 +104,6 @@ class _DetalhePageState extends State<DetalhePage> {
     });
   }
 
-  /// Retorna a lista a exibir (crescente ou decrescente) sem alterar _capitulos.
   List<Capitulo> get _capitulosExibidos =>
       _ordemCrescente ? _capitulos : _capitulos.reversed.toList();
 
@@ -192,20 +198,22 @@ class _DetalhePageState extends State<DetalhePage> {
   void _snack(String msg) {
     if (!mounted) return;
     ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(content: Text(msg), behavior: SnackBarBehavior.floating),
-    );
+        SnackBar(content: Text(msg), behavior: SnackBarBehavior.floating));
   }
 
-  String _descricao() {
-    const m = {
-      'One Piece': 'Uma grande aventura pirata em busca do tesouro lendário.',
-      'Naruto': 'A jornada de um ninja determinado a se tornar Hokage.',
-      'Attack on Titan':
-          'A luta da humanidade contra os titãs em um mundo cruel.',
-      'Kagurabachi': 'A busca por espadas mágicas numa aventura sombria.',
-      'Jujutsu Kaisen': 'Feiticeiros contra maldições em batalhas épicas.',
-    };
-    return m[widget.titulo] ?? 'Acompanhe os capítulos e continue sua leitura.';
+  String _statusLabel(String status) {
+    switch (status) {
+      case 'em_andamento':
+        return 'Em andamento';
+      case 'completa':
+        return 'Completa';
+      case 'hiato':
+        return 'Hiato';
+      case 'cancelada':
+        return 'Cancelada';
+      default:
+        return status;
+    }
   }
 
   // =========================================================
@@ -221,203 +229,410 @@ class _DetalhePageState extends State<DetalhePage> {
 
     return Scaffold(
       backgroundColor: fundo,
-      appBar: AppBar(
-        backgroundColor: isDark ? const Color(0xFF1A1030) : roxo,
-        foregroundColor: Colors.white,
-        elevation: 0,
-        centerTitle: true,
-        title: const Text('Toon Archive',
-            style: TextStyle(fontWeight: FontWeight.w800, fontSize: 17)),
-        actions: [
-          _carregando
-              ? const Padding(
-                  padding: EdgeInsets.all(14),
-                  child: SizedBox(
-                    width: 18,
-                    height: 18,
-                    child: CircularProgressIndicator(
-                        strokeWidth: 2, color: Colors.white),
-                  ))
-              : IconButton(
-                  icon: Icon(
-                    _isFavorito
-                        ? Icons.favorite_rounded
-                        : Icons.favorite_border_rounded,
-                    color: Colors.white,
-                  ),
-                  onPressed: _toggleFavorito,
-                ),
-        ],
-      ),
-      body: Column(
-        children: [
-          // ── Cabeçalho da obra ─────────────────────────────
-          Container(
-            margin: const EdgeInsets.fromLTRB(14, 14, 14, 0),
-            padding: const EdgeInsets.all(18),
-            decoration: BoxDecoration(
-              borderRadius: BorderRadius.circular(22),
-              gradient: LinearGradient(
-                colors: isDark
-                    ? [const Color(0xFF2D1B5E), const Color(0xFF1A1030)]
-                    : [roxo, const Color(0xFF9F67FA)],
-                begin: Alignment.topLeft,
-                end: Alignment.bottomRight,
-              ),
-              boxShadow: [
-                BoxShadow(
-                    color: roxo.withOpacity(0.22),
-                    blurRadius: 16,
-                    offset: const Offset(0, 6)),
+      body: CustomScrollView(
+        slivers: [
+          // ── SliverAppBar com capa ──────────────────────────
+          SliverAppBar(
+            expandedHeight: 300,
+            pinned: true,
+            backgroundColor: isDark ? const Color(0xFF1A1030) : roxo,
+            foregroundColor: Colors.white,
+            actions: [
+              _carregando
+                  ? const Padding(
+                      padding: EdgeInsets.all(14),
+                      child: SizedBox(
+                          width: 18,
+                          height: 18,
+                          child: CircularProgressIndicator(
+                              strokeWidth: 2, color: Colors.white)))
+                  : IconButton(
+                      icon: Icon(
+                        _isFavorito
+                            ? Icons.bookmark_rounded
+                            : Icons.bookmark_border_rounded,
+                        color: Colors.white,
+                      ),
+                      onPressed: _toggleFavorito,
+                    ),
+            ],
+            flexibleSpace: FlexibleSpaceBar(
+              background: _buildHeroBanner(isDark, roxo),
+            ),
+          ),
+
+          // ── Corpo ──────────────────────────────────────────
+          SliverToBoxAdapter(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                _buildInfoSection(isDark, roxo, card),
+                _buildGenerosSection(isDark, roxo),
+                _buildDescricaoSection(isDark, roxo),
+                _buildCapitulosHeader(isDark, roxo),
               ],
             ),
-            child:
-                Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-              Text(widget.titulo,
-                  style: const TextStyle(
-                      color: Colors.white,
-                      fontSize: 22,
-                      fontWeight: FontWeight.w900)),
-              const SizedBox(height: 8),
-              Text(_descricao(),
-                  style: const TextStyle(
-                      color: Colors.white70, fontSize: 13, height: 1.4)),
-              const SizedBox(height: 14),
-// Substitui o Wrap existente com _chip('${_capitulos.length} capítulos') etc.
-              Wrap(spacing: 6, runSpacing: 6, children: [
-                _chip('${_capitulos.length} cap.'),
-                // Tipo (Mangá, HQ...)
-                ..._generos
-                    .where((g) => g.categoria == 'tipo')
-                    .map((g) => _chip(g.nome)),
-                // Demográfico
-                ..._generos
-                    .where((g) => g.categoria == 'demografico')
-                    .map((g) => _chip(g.nome)),
-              ]),
-              const SizedBox(height: 8),
-// Narrativos em linha separada com cor diferente
-              if (_generos.any((g) => g.categoria == 'narrativo'))
-                Wrap(
-                  spacing: 6,
-                  runSpacing: 4,
-                  children: _generos
-                      .where((g) => g.categoria == 'narrativo')
-                      .map((g) => Container(
-                            padding: const EdgeInsets.symmetric(
-                                horizontal: 10, vertical: 4),
-                            decoration: BoxDecoration(
-                              color: Colors.white.withOpacity(0.10),
-                              borderRadius: BorderRadius.circular(999),
-                              border: Border.all(
-                                  color: Colors.white.withOpacity(0.3)),
-                            ),
-                            child: Text(g.nome,
-                                style: const TextStyle(
-                                    color: Colors.white70,
-                                    fontSize: 11,
-                                    fontWeight: FontWeight.w600)),
-                          ))
-                      .toList(),
-                ),
-            ]),
           ),
 
-          // ── Barra de controle da lista ────────────────────
-          Padding(
-            padding: const EdgeInsets.fromLTRB(14, 12, 14, 8),
-            child: Row(children: [
-              Container(
-                padding: const EdgeInsets.all(7),
-                decoration: BoxDecoration(
-                  color: roxo.withOpacity(0.10),
-                  borderRadius: BorderRadius.circular(10),
-                ),
-                child: Icon(Icons.menu_book_rounded, color: roxo, size: 18),
-              ),
-              const SizedBox(width: 8),
-              Text('Capítulos',
-                  style: TextStyle(
-                      fontSize: 16,
-                      fontWeight: FontWeight.w800,
-                      color: isDark ? Colors.white : Colors.black87)),
-              const SizedBox(width: 6),
-              Container(
-                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
-                decoration: BoxDecoration(
-                  color: roxo.withOpacity(0.12),
-                  borderRadius: BorderRadius.circular(999),
-                ),
-                child: Text(
-                  '${_capitulos.length}',
-                  style: TextStyle(
-                      color: roxo, fontWeight: FontWeight.w800, fontSize: 12),
-                ),
-              ),
-              const Spacer(),
-              // Botão de ordenação
-              GestureDetector(
-                onTap: () => setState(() => _ordemCrescente = !_ordemCrescente),
-                child: Container(
-                  padding:
-                      const EdgeInsets.symmetric(horizontal: 12, vertical: 7),
-                  decoration: BoxDecoration(
-                    color: roxo.withOpacity(0.10),
-                    borderRadius: BorderRadius.circular(12),
-                    border: Border.all(color: roxo.withOpacity(0.20)),
+          // ── Lista de capítulos ─────────────────────────────
+          if (_carregandoCaps)
+            const SliverFillRemaining(
+              child: Center(child: CircularProgressIndicator()),
+            )
+          else if (_capitulos.isEmpty)
+            SliverFillRemaining(child: _estadoVazio(roxo))
+          else
+            SliverPadding(
+              padding: const EdgeInsets.fromLTRB(14, 0, 14, 30),
+              sliver: SliverList(
+                delegate: SliverChildBuilderDelegate(
+                  (_, i) => Padding(
+                    padding: const EdgeInsets.only(bottom: 8),
+                    child: _buildCapituloCard(
+                        _capitulosExibidos[i], isDark, roxo, card),
                   ),
-                  child: Row(mainAxisSize: MainAxisSize.min, children: [
-                    Icon(
-                      _ordemCrescente
-                          ? Icons.arrow_upward_rounded
-                          : Icons.arrow_downward_rounded,
-                      size: 14,
-                      color: roxo,
-                    ),
-                    const SizedBox(width: 4),
-                    Text(
-                      _ordemCrescente ? 'Crescente' : 'Decrescente',
-                      style: TextStyle(
-                          fontSize: 12,
-                          color: roxo,
-                          fontWeight: FontWeight.w700),
-                    ),
-                  ]),
+                  childCount: _capitulosExibidos.length,
                 ),
               ),
-            ]),
-          ),
+            ),
+        ],
+      ),
+    );
+  }
 
-          // Divisor
-          Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 14),
-            child: Divider(color: roxo.withOpacity(0.12), height: 1),
-          ),
+  // =========================================================
+  // HERO BANNER — capa + overlay com título
+  // =========================================================
 
-          // ── Lista de capítulos ────────────────────────────
-          Expanded(
-            child: _carregandoCaps
-                ? const Center(child: CircularProgressIndicator())
-                : _capitulos.isEmpty
-                    ? _estadoVazio(roxo)
-                    : RefreshIndicator(
-                        onRefresh: _carregarCapitulos,
-                        child: ListView.separated(
-                          padding: const EdgeInsets.fromLTRB(14, 10, 14, 20),
-                          itemCount: _capitulosExibidos.length,
-                          separatorBuilder: (_, __) =>
-                              const SizedBox(height: 8),
-                          itemBuilder: (_, i) => _buildCapituloCard(
-                            _capitulosExibidos[i],
-                            isDark,
-                            roxo,
-                            card,
-                          ),
+  Widget _buildHeroBanner(bool isDark, Color roxo) {
+    final capaUrl = _obra?.capaUrl;
+    final bannerUrl = _obra?.bannerUrl;
+
+    return Stack(
+      fit: StackFit.expand,
+      children: [
+        // Fundo: banner (se tiver), senão capa, senão gradiente
+        if (bannerUrl != null && bannerUrl.isNotEmpty)
+          Image.network(bannerUrl,
+              fit: BoxFit.cover,
+              errorBuilder: (_, __, ___) => _gradienteFundo(isDark, roxo))
+        else if (capaUrl != null && capaUrl.isNotEmpty)
+          Image.network(capaUrl,
+              fit: BoxFit.cover,
+              errorBuilder: (_, __, ___) => _gradienteFundo(isDark, roxo))
+        else
+          _gradienteFundo(isDark, roxo),
+
+        Container(
+          decoration: BoxDecoration(
+            gradient: LinearGradient(
+              colors: [
+                Colors.transparent,
+                Colors.black.withOpacity(0.55),
+                Colors.black.withOpacity(0.88),
+              ],
+              begin: Alignment.topCenter,
+              end: Alignment.bottomCenter,
+              stops: const [0.3, 0.65, 1.0],
+            ),
+          ),
+        ),
+        // Gradiente escuro sobre a imagem
+        Container(
+          decoration: BoxDecoration(
+            gradient: LinearGradient(
+              colors: [
+                Colors.transparent,
+                Colors.black.withOpacity(0.55),
+                Colors.black.withOpacity(0.88),
+              ],
+              begin: Alignment.topCenter,
+              end: Alignment.bottomCenter,
+              stops: const [0.3, 0.65, 1.0],
+            ),
+          ),
+        ),
+
+        // Conteúdo sobre o banner: capa pequena + título + autor
+        // Miniatura da capa + título + autor (igual ao anterior)
+        Positioned(
+          left: 16,
+          right: 16,
+          bottom: 16,
+          child: Row(
+            crossAxisAlignment: CrossAxisAlignment.end,
+            children: [
+              ClipRRect(
+                borderRadius: BorderRadius.circular(10),
+                child: SizedBox(
+                  width: 90,
+                  height: 130,
+                  child: capaUrl != null && capaUrl.isNotEmpty
+                      ? Image.network(capaUrl,
+                          fit: BoxFit.cover,
+                          errorBuilder: (_, __, ___) => Container(
+                                color: roxo.withOpacity(0.5),
+                                child: const Icon(Icons.menu_book_rounded,
+                                    color: Colors.white, size: 32),
+                              ))
+                      : Container(
+                          color: roxo.withOpacity(0.5),
+                          child: const Icon(Icons.menu_book_rounded,
+                              color: Colors.white, size: 32),
                         ),
-                      ),
+                ),
+              ),
+              const SizedBox(width: 14),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Text(widget.titulo,
+                        style: const TextStyle(
+                            color: Colors.white,
+                            fontSize: 22,
+                            fontWeight: FontWeight.w900,
+                            height: 1.2)),
+                    if (_obra?.autor?.isNotEmpty ?? false) ...[
+                      const SizedBox(height: 4),
+                      Text(_obra!.autor!,
+                          style: TextStyle(
+                              color: Colors.white.withOpacity(0.75),
+                              fontSize: 13,
+                              fontWeight: FontWeight.w500)),
+                    ],
+                  ],
+                ),
+              ),
+            ],
+          ),
+        ),
+      ],
+    );
+  }
+
+  Widget _gradienteFundo(bool isDark, Color roxo) => Container(
+        decoration: BoxDecoration(
+          gradient: LinearGradient(
+            colors: isDark
+                ? [const Color(0xFF2D1B5E), const Color(0xFF1A1030)]
+                : [roxo, const Color(0xFF9F67FA)],
+            begin: Alignment.topCenter,
+            end: Alignment.bottomCenter,
+          ),
+        ),
+      );
+
+  // =========================================================
+  // INFO — status + total caps + botão iniciar
+  // =========================================================
+
+  Widget _buildInfoSection(bool isDark, Color roxo, Color card) {
+    final status = _obra?.status ?? 'em_andamento';
+
+    return Container(
+      color: card,
+      padding: const EdgeInsets.fromLTRB(16, 14, 16, 14),
+      child: Row(children: [
+        // Status
+        _tagChip(_statusLabel(status), _statusColor(status)),
+        const SizedBox(width: 8),
+        // Total capítulos
+        _tagChip('${_capitulos.length} cap.', roxo),
+        const Spacer(),
+        // Botão Iniciar leitura
+        if (_capitulos.isNotEmpty)
+          ElevatedButton.icon(
+            onPressed: () =>
+                Navigator.pushNamed(context, '/leitura', arguments: {
+              'obraId': widget.obraId,
+              'capituloId': _capitulos.first.id,
+              'capitulo': _capitulos.first.titulo,
+              'titulo': widget.titulo,
+            }),
+            style: ElevatedButton.styleFrom(
+              backgroundColor: roxo,
+              foregroundColor: Colors.white,
+              elevation: 0,
+              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
+              shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(12)),
+            ),
+            icon: const Icon(Icons.play_arrow_rounded, size: 18),
+            label: const Text('Iniciar',
+                style: TextStyle(fontWeight: FontWeight.w700)),
+          ),
+      ]),
+    );
+  }
+
+  Color _statusColor(String status) {
+    switch (status) {
+      case 'em_andamento':
+        return Colors.green;
+      case 'completa':
+        return Colors.blue;
+      case 'hiato':
+        return Colors.orange;
+      case 'cancelada':
+        return Colors.red;
+      default:
+        return Colors.grey;
+    }
+  }
+
+  // =========================================================
+  // GÊNEROS
+  // =========================================================
+
+  Widget _buildGenerosSection(bool isDark, Color roxo) {
+    if (_generos.isEmpty) return const SizedBox.shrink();
+
+    final card = isDark ? const Color(0xFF1A1030) : Colors.white;
+
+    // Agrupa por categoria
+    final demografico =
+        _generos.where((g) => g.categoria == 'demografico').toList();
+    final narrativo =
+        _generos.where((g) => g.categoria == 'narrativo').toList();
+    final tipo = _generos.where((g) => g.categoria == 'tipo').toList();
+
+    return Container(
+      color: card,
+      padding: const EdgeInsets.fromLTRB(16, 0, 16, 14),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Divider(color: roxo.withOpacity(0.10), height: 1),
+          const SizedBox(height: 12),
+          Wrap(
+            spacing: 6,
+            runSpacing: 6,
+            children: [
+              // Narrativos — destaque principal
+              ...narrativo.map((g) => _tagChip(g.nome, roxo)),
+              // Tipo (Mangá, HQ...) — azul acinzentado
+              ...tipo.map((g) => _tagChip(g.nome, Colors.blueGrey)),
+              // Demográfico — menor destaque
+              ...demografico.map((g) =>
+                  _tagChip(g.nome, isDark ? Colors.white38 : Colors.black38)),
+            ],
           ),
         ],
       ),
+    );
+  }
+
+  // =========================================================
+  // DESCRIÇÃO expansível
+  // =========================================================
+
+  Widget _buildDescricaoSection(bool isDark, Color roxo) {
+    final descricao = _obra?.descricao ?? '';
+    if (descricao.isEmpty) return const SizedBox.shrink();
+
+    final card = isDark ? const Color(0xFF1A1030) : Colors.white;
+    final textColor = isDark ? Colors.white70 : Colors.black87;
+
+    return Container(
+      color: card,
+      padding: const EdgeInsets.fromLTRB(16, 0, 16, 14),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Divider(color: roxo.withOpacity(0.10), height: 1),
+          const SizedBox(height: 12),
+          AnimatedCrossFade(
+            duration: const Duration(milliseconds: 200),
+            crossFadeState: _descricaoExpandida
+                ? CrossFadeState.showSecond
+                : CrossFadeState.showFirst,
+            firstChild: Text(descricao,
+                maxLines: 3,
+                overflow: TextOverflow.ellipsis,
+                style: TextStyle(fontSize: 13, color: textColor, height: 1.5)),
+            secondChild: Text(descricao,
+                style: TextStyle(fontSize: 13, color: textColor, height: 1.5)),
+          ),
+          const SizedBox(height: 6),
+          GestureDetector(
+            onTap: () =>
+                setState(() => _descricaoExpandida = !_descricaoExpandida),
+            child: Text(
+              _descricaoExpandida ? 'Ver menos' : 'Ver mais',
+              style: TextStyle(
+                  color: roxo, fontWeight: FontWeight.w700, fontSize: 12),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  // =========================================================
+  // CABEÇALHO DA LISTA DE CAPÍTULOS
+  // =========================================================
+
+  Widget _buildCapitulosHeader(bool isDark, Color roxo) {
+    final fundo = isDark ? const Color(0xFF0F0A1E) : const Color(0xFFF5F3FF);
+    return Container(
+      color: fundo,
+      padding: const EdgeInsets.fromLTRB(14, 14, 14, 8),
+      child: Row(children: [
+        Container(
+          padding: const EdgeInsets.all(7),
+          decoration: BoxDecoration(
+            color: roxo.withOpacity(0.10),
+            borderRadius: BorderRadius.circular(10),
+          ),
+          child: Icon(Icons.menu_book_rounded, color: roxo, size: 18),
+        ),
+        const SizedBox(width: 8),
+        Text('Capítulos',
+            style: TextStyle(
+                fontSize: 16,
+                fontWeight: FontWeight.w800,
+                color: isDark ? Colors.white : Colors.black87)),
+        const SizedBox(width: 6),
+        Container(
+          padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+          decoration: BoxDecoration(
+            color: roxo.withOpacity(0.12),
+            borderRadius: BorderRadius.circular(999),
+          ),
+          child: Text('${_capitulos.length}',
+              style: TextStyle(
+                  color: roxo, fontWeight: FontWeight.w800, fontSize: 12)),
+        ),
+        const Spacer(),
+        GestureDetector(
+          onTap: () => setState(() => _ordemCrescente = !_ordemCrescente),
+          child: Container(
+            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 7),
+            decoration: BoxDecoration(
+              color: roxo.withOpacity(0.10),
+              borderRadius: BorderRadius.circular(12),
+              border: Border.all(color: roxo.withOpacity(0.20)),
+            ),
+            child: Row(mainAxisSize: MainAxisSize.min, children: [
+              Icon(
+                _ordemCrescente
+                    ? Icons.arrow_upward_rounded
+                    : Icons.arrow_downward_rounded,
+                size: 14,
+                color: roxo,
+              ),
+              const SizedBox(width: 4),
+              Text(
+                _ordemCrescente ? 'Crescente' : 'Decrescente',
+                style: TextStyle(
+                    fontSize: 12, color: roxo, fontWeight: FontWeight.w700),
+              ),
+            ]),
+          ),
+        ),
+      ]),
     );
   }
 
@@ -433,18 +648,17 @@ class _DetalhePageState extends State<DetalhePage> {
     return Container(
       decoration: BoxDecoration(
         color: card,
-        borderRadius: BorderRadius.circular(18),
-        border: Border.all(color: roxo.withOpacity(0.12)),
+        borderRadius: BorderRadius.circular(16),
+        border: Border.all(color: roxo.withOpacity(0.10)),
         boxShadow: [
           BoxShadow(
-            color: Colors.black.withOpacity(isDark ? 0.14 : 0.04),
-            blurRadius: 8,
-            offset: const Offset(0, 3),
-          ),
+              color: Colors.black.withOpacity(isDark ? 0.12 : 0.04),
+              blurRadius: 6,
+              offset: const Offset(0, 2))
         ],
       ),
       child: InkWell(
-        borderRadius: BorderRadius.circular(18),
+        borderRadius: BorderRadius.circular(16),
         onTap: () => Navigator.pushNamed(context, '/leitura', arguments: {
           'obraId': widget.obraId,
           'capituloId': cap.id,
@@ -456,48 +670,43 @@ class _DetalhePageState extends State<DetalhePage> {
           child:
               Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
             Row(children: [
-              // Número do capítulo
+              // Número
               Container(
-                width: 44,
-                height: 44,
+                width: 42,
+                height: 42,
                 decoration: BoxDecoration(
                   gradient: LinearGradient(
                     colors: [roxo, roxo.withOpacity(0.7)],
                     begin: Alignment.topLeft,
                     end: Alignment.bottomRight,
                   ),
-                  borderRadius: BorderRadius.circular(13),
+                  borderRadius: BorderRadius.circular(12),
                 ),
                 alignment: Alignment.center,
-                child: Text(
-                  '${cap.numero}',
-                  style: const TextStyle(
-                      color: Colors.white,
-                      fontWeight: FontWeight.w900,
-                      fontSize: 15),
-                ),
+                child: Text('${cap.numero}',
+                    style: const TextStyle(
+                        color: Colors.white,
+                        fontWeight: FontWeight.w900,
+                        fontSize: 14)),
               ),
               const SizedBox(width: 12),
-              // Título + badge offline
+              // Título + badge
               Expanded(
                   child: Column(
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
-                    Text(
-                      cap.titulo,
-                      style: TextStyle(
-                        fontSize: 15,
-                        fontWeight: FontWeight.w700,
-                        color: isDark ? Colors.white : Colors.black87,
-                      ),
-                    ),
-                    const SizedBox(height: 3),
+                    Text(cap.titulo,
+                        style: TextStyle(
+                            fontSize: 14,
+                            fontWeight: FontWeight.w700,
+                            color: isDark ? Colors.white : Colors.black87)),
+                    const SizedBox(height: 2),
                     if (baixado)
                       Row(children: [
                         Icon(Icons.offline_pin_rounded,
-                            size: 13, color: Colors.green.shade400),
-                        const SizedBox(width: 4),
-                        Text('Disponível offline',
+                            size: 12, color: Colors.green.shade400),
+                        const SizedBox(width: 3),
+                        Text('Offline',
                             style: TextStyle(
                                 fontSize: 11, color: Colors.green.shade400)),
                       ])
@@ -507,16 +716,15 @@ class _DetalhePageState extends State<DetalhePage> {
                               fontSize: 11,
                               color: isDark ? Colors.white38 : Colors.black38)),
                   ])),
-              // Botão download / deletar
+              // Download / delete
               eBaixando
                   ? Padding(
                       padding: const EdgeInsets.all(10),
                       child: SizedBox(
-                        width: 22,
-                        height: 22,
-                        child: CircularProgressIndicator(
-                            strokeWidth: 2, color: roxo),
-                      ))
+                          width: 20,
+                          height: 20,
+                          child: CircularProgressIndicator(
+                              strokeWidth: 2, color: roxo)))
                   : IconButton(
                       icon: Icon(
                         baixado ? Icons.delete_rounded : Icons.download_rounded,
@@ -526,17 +734,17 @@ class _DetalhePageState extends State<DetalhePage> {
                           ? _removerDownload(cap)
                           : _baixarCapitulo(cap.id),
                     ),
-              // Seta de leitura
+              // Seta
               Container(
-                padding: const EdgeInsets.all(6),
+                padding: const EdgeInsets.all(5),
                 decoration: BoxDecoration(
                   color: roxo.withOpacity(0.08),
                   borderRadius: BorderRadius.circular(8),
                 ),
-                child: Icon(Icons.chevron_right_rounded, color: roxo, size: 20),
+                child: Icon(Icons.chevron_right_rounded, color: roxo, size: 18),
               ),
             ]),
-            // Barra de progresso de download
+            // Barra de progresso
             if (eBaixando && prog != null && prog.$2 > 0)
               Padding(
                 padding: const EdgeInsets.only(top: 10),
@@ -564,6 +772,10 @@ class _DetalhePageState extends State<DetalhePage> {
     );
   }
 
+  // =========================================================
+  // HELPERS
+  // =========================================================
+
   Widget _estadoVazio(Color roxo) => Center(
         child: Padding(
           padding: const EdgeInsets.all(32),
@@ -571,9 +783,7 @@ class _DetalhePageState extends State<DetalhePage> {
             Container(
               padding: const EdgeInsets.all(20),
               decoration: BoxDecoration(
-                color: roxo.withOpacity(0.08),
-                shape: BoxShape.circle,
-              ),
+                  color: roxo.withOpacity(0.08), shape: BoxShape.circle),
               child: Icon(Icons.menu_book_outlined,
                   size: 48, color: roxo.withOpacity(0.5)),
             ),
@@ -587,16 +797,15 @@ class _DetalhePageState extends State<DetalhePage> {
         ),
       );
 
-  Widget _chip(String texto) => Container(
-        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 5),
+  Widget _tagChip(String texto, Color cor) => Container(
+        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
         decoration: BoxDecoration(
-          color: Colors.white.withOpacity(0.16),
+          color: cor.withOpacity(0.12),
           borderRadius: BorderRadius.circular(999),
+          border: Border.all(color: cor.withOpacity(0.25)),
         ),
         child: Text(texto,
-            style: const TextStyle(
-                color: Colors.white,
-                fontWeight: FontWeight.w700,
-                fontSize: 12)),
+            style: TextStyle(
+                fontSize: 11, fontWeight: FontWeight.w700, color: cor)),
       );
 }

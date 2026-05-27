@@ -6,10 +6,14 @@ import 'core/database/database_helper.dart';
 import 'core/database/supabase_client.dart';
 import 'core/sync/sync_service.dart';
 import 'routes/app_routes.dart';
-import 'screens/splash_page.dart'; 
+import 'screens/splash_page.dart';
+
+import 'package:sqflite/sqflite.dart';
+import 'package:path/path.dart' as p;
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
+
   await Firebase.initializeApp(options: DefaultFirebaseOptions.currentPlatform);
   await SupabaseClientHelper.init();
   await DatabaseHelper.instance.database;
@@ -44,7 +48,8 @@ class _ToonArchiveAppState extends State<ToonArchiveApp> {
       themeMode: darkMode ? ThemeMode.dark : ThemeMode.light,
       theme: ThemeData(
         useMaterial3: true,
-        colorScheme: ColorScheme.fromSeed(seedColor: const Color(0xFF7C3AED)).copyWith(
+        colorScheme:
+            ColorScheme.fromSeed(seedColor: const Color(0xFF7C3AED)).copyWith(
           primary: const Color(0xFF7C3AED),
           secondary: const Color(0xFF9F67FA),
         ),

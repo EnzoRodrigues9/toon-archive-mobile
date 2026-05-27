@@ -257,7 +257,8 @@ class _GrupoChatPageState extends State<GrupoChatPage> {
     }
   }
 
-  bool _eMinha(Map<String, dynamic> msg) => msg['usuario_id'] == _usuario?.id;
+  bool _eMinha(Map<String, dynamic> msg) =>
+      msg['usuario_id'] == _usuario?.id || _usuario?.role == 'admin';
 
   String _formatarData(String iso) {
     final dt = DateTime.parse(iso).toLocal();

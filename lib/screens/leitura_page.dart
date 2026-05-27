@@ -30,8 +30,7 @@ class LeituraPage extends StatefulWidget {
   State<LeituraPage> createState() => _LeituraPageState();
 }
 
-class _LeituraPageState extends State<LeituraPage>
-    with WidgetsBindingObserver {
+class _LeituraPageState extends State<LeituraPage> with WidgetsBindingObserver {
   bool _disposed = false;
   bool modoClique = false;
 
@@ -41,22 +40,22 @@ class _LeituraPageState extends State<LeituraPage>
   String? _obraId;
   Usuario? _usuario;
 
-  final _paginasRepo   = PaginasRepository.instance;
+  final _paginasRepo = PaginasRepository.instance;
   final _progressoRepo = ProgressoRepository.instance;
-  final _authService   = AuthService();
+  final _authService = AuthService();
   final _capitulosRepo = CapitulosRepository.instance;
-  final _supabase      = Supabase.instance.client;
+  final _supabase = Supabase.instance.client;
 
   final TextEditingController comentarioController = TextEditingController();
 
-  List<Pagina>             _paginas    = [];
-  List<Capitulo>           _capitulos  = [];
+  List<Pagina> _paginas = [];
+  List<Capitulo> _capitulos = [];
   List<Map<String, dynamic>> _comentarios = [];
 
-  bool _carregando          = true;
+  bool _carregando = true;
   bool _carregandoComentarios = false;
-  bool _enviandoComentario  = false;
-  int  _paginaAtual         = 1;
+  bool _enviandoComentario = false;
+  int _paginaAtual = 1;
 
   Capitulo? _capituloAnterior;
   Capitulo? _proximoCapitulo;
@@ -101,9 +100,9 @@ class _LeituraPageState extends State<LeituraPage>
   Future<void> _inicializar() async {
     final usuario = await _authService.getUsuarioInterno();
     if (_disposed) return;
-    _usuario   = usuario;
+    _usuario = usuario;
     _usuarioId = usuario?.id;
-    _obraId    = widget.obraId;
+    _obraId = widget.obraId;
 
     await _carregarPaginas();
     if (_disposed) return;
@@ -125,9 +124,9 @@ class _LeituraPageState extends State<LeituraPage>
     lista.sort((a, b) => a.numero.compareTo(b.numero));
     final indexAtual = lista.indexWhere((c) => c.id == widget.capituloId);
     _safeSetState(() {
-      _capitulos        = lista;
+      _capitulos = lista;
       _capituloAnterior = indexAtual > 0 ? lista[indexAtual - 1] : null;
-      _proximoCapitulo  = (indexAtual != -1 && indexAtual < lista.length - 1)
+      _proximoCapitulo = (indexAtual != -1 && indexAtual < lista.length - 1)
           ? lista[indexAtual + 1]
           : null;
     });
@@ -138,8 +137,8 @@ class _LeituraPageState extends State<LeituraPage>
       _inicializarController();
       return;
     }
-    final progresso = await _progressoRepo.buscarProgresso(
-        _usuarioId!, _obraId!);
+    final progresso =
+        await _progressoRepo.buscarProgresso(_usuarioId!, _obraId!);
     if (_disposed) return;
     if (progresso != null && progresso.capituloId == widget.capituloId) {
       _paginaAtual = progresso.ultimaPagina;
@@ -150,8 +149,8 @@ class _LeituraPageState extends State<LeituraPage>
   void _inicializarController() {
     if (_disposed) return;
     controller?.dispose();
-    controller = PageController(
-        initialPage: _paginaAtual > 0 ? _paginaAtual - 1 : 0);
+    controller =
+        PageController(initialPage: _paginaAtual > 0 ? _paginaAtual - 1 : 0);
     _safeSetState(() => _carregando = false);
   }
 
@@ -159,9 +158,9 @@ class _LeituraPageState extends State<LeituraPage>
     if (_usuarioId == null || _obraId == null) return;
     try {
       await _progressoRepo.salvarProgresso(
-        usuarioId:    _usuarioId!,
-        obraId:       _obraId!,
-        capituloId:   widget.capituloId,
+        usuarioId: _usuarioId!,
+        obraId: _obraId!,
+        capituloId: widget.capituloId,
         ultimaPagina: _paginaAtual,
       );
     } catch (_) {}
@@ -172,8 +171,8 @@ class _LeituraPageState extends State<LeituraPage>
     if (indexPagina == _paginas.length - 1) {
       try {
         await _progressoRepo.marcarConcluido(
-          usuarioId:  _usuarioId!,
-          obraId:     _obraId!,
+          usuarioId: _usuarioId!,
+          obraId: _obraId!,
           capituloId: widget.capituloId,
         );
       } catch (_) {}
@@ -184,65 +183,65 @@ class _LeituraPageState extends State<LeituraPage>
   // COMENTÁRIOS — Supabase
   // =========================================================
 
-Future<void> _carregarComentarios() async {
-  _safeSetState(() => _carregandoComentarios = true);
-  try {
-    final rows = await _supabase
-        .from('comentarios')
-        .select('*, usuarios(nome)')
-        .eq('obra_id', widget.obraId)
-        .eq('capitulo_id', widget.capituloId) 
-        .order('criado_em', ascending: true);
+  Future<void> _carregarComentarios() async {
+    _safeSetState(() => _carregandoComentarios = true);
+    try {
+      final rows = await _supabase
+          .from('comentarios')
+          .select('*, usuarios(nome)')
+          .eq('obra_id', widget.obraId)
+          .eq('capitulo_id', widget.capituloId)
+          .order('criado_em', ascending: true);
 
-    if (_disposed) return;
-    _safeSetState(() {
-      _comentarios = List<Map<String, dynamic>>.from(rows);
-      _carregandoComentarios = false;
-    });
-  } catch (e) {
-    if (_disposed) return;
-    _safeSetState(() => _carregandoComentarios = false);
-  }
-}
-
-Future<void> _adicionarComentario() async {
-  final texto = comentarioController.text.trim();
-  if (texto.isEmpty || _enviandoComentario) return;
-  if (_usuario == null) {
-    ScaffoldMessenger.of(context).showSnackBar(
-      const SnackBar(content: Text('Faça login para comentar.')),
-    );
-    return;
+      if (_disposed) return;
+      _safeSetState(() {
+        _comentarios = List<Map<String, dynamic>>.from(rows);
+        _carregandoComentarios = false;
+      });
+    } catch (e) {
+      if (_disposed) return;
+      _safeSetState(() => _carregandoComentarios = false);
+    }
   }
 
-  _safeSetState(() => _enviandoComentario = true);
-  comentarioController.clear();
+  Future<void> _adicionarComentario() async {
+    final texto = comentarioController.text.trim();
+    if (texto.isEmpty || _enviandoComentario) return;
+    if (_usuario == null) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Faça login para comentar.')),
+      );
+      return;
+    }
 
-  try {
-    final row = await _supabase
-        .from('comentarios')
-        .insert({
-          'usuario_id':  _usuario!.id,
-          'obra_id':     widget.obraId,
-          'capitulo_id': widget.capituloId, 
-          'conteudo':    texto,
-        })
-        .select('*, usuarios(nome)')
-        .single();
+    _safeSetState(() => _enviandoComentario = true);
+    comentarioController.clear();
 
-    if (_disposed) return;
-    _safeSetState(() {
-      _comentarios.add(row);
-      _enviandoComentario = false;
-    });
-  } catch (e) {
-    if (_disposed) return;
-    _safeSetState(() => _enviandoComentario = false);
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(content: Text('Erro ao comentar: $e')),
-    );
+    try {
+      final row = await _supabase
+          .from('comentarios')
+          .insert({
+            'usuario_id': _usuario!.id,
+            'obra_id': widget.obraId,
+            'capitulo_id': widget.capituloId,
+            'conteudo': texto,
+          })
+          .select('*, usuarios(nome)')
+          .single();
+
+      if (_disposed) return;
+      _safeSetState(() {
+        _comentarios.add(row);
+        _enviandoComentario = false;
+      });
+    } catch (e) {
+      if (_disposed) return;
+      _safeSetState(() => _enviandoComentario = false);
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Erro ao comentar: $e')),
+      );
+    }
   }
-}
 
   Future<void> _editarComentario(Map<String, dynamic> comentario) async {
     comentarioController.text = comentario['conteudo'];
@@ -251,9 +250,7 @@ Future<void> _adicionarComentario() async {
       builder: (_) => AlertDialog(
         title: const Text('Editar comentário'),
         content: TextField(
-            controller: comentarioController,
-            autofocus: true,
-            maxLines: null),
+            controller: comentarioController, autofocus: true, maxLines: null),
         actions: [
           TextButton(
               onPressed: () => Navigator.pop(context, false),
@@ -271,22 +268,17 @@ Future<void> _adicionarComentario() async {
     }
 
     try {
-      await _supabase
-          .from('comentarios')
-          .update({
-            'conteudo':      comentarioController.text.trim(),
-            'editado':       1,
-            'atualizado_em': DateTime.now().toIso8601String(),
-          })
-          .eq('id', comentario['id']);
+      await _supabase.from('comentarios').update({
+        'conteudo': comentarioController.text.trim(),
+        'editado': 1,
+        'atualizado_em': DateTime.now().toIso8601String(),
+      }).eq('id', comentario['id']);
 
       if (_disposed) return;
       _safeSetState(() {
-        final i =
-            _comentarios.indexWhere((c) => c['id'] == comentario['id']);
+        final i = _comentarios.indexWhere((c) => c['id'] == comentario['id']);
         if (i != -1) {
-          _comentarios[i]['conteudo'] =
-              comentarioController.text.trim();
+          _comentarios[i]['conteudo'] = comentarioController.text.trim();
           _comentarios[i]['editado'] = 1;
         }
       });
@@ -304,8 +296,7 @@ Future<void> _adicionarComentario() async {
       context: context,
       builder: (_) => AlertDialog(
         title: const Text('Excluir comentário'),
-        content:
-            const Text('Tem certeza que deseja excluir este comentário?'),
+        content: const Text('Tem certeza que deseja excluir este comentário?'),
         actions: [
           TextButton(
               onPressed: () => Navigator.pop(context, false),
@@ -321,14 +312,11 @@ Future<void> _adicionarComentario() async {
     if (confirmar != true) return;
 
     try {
-      await _supabase
-          .from('comentarios')
-          .delete()
-          .eq('id', comentario['id']);
+      await _supabase.from('comentarios').delete().eq('id', comentario['id']);
 
       if (_disposed) return;
-      _safeSetState(() =>
-          _comentarios.removeWhere((c) => c['id'] == comentario['id']));
+      _safeSetState(
+          () => _comentarios.removeWhere((c) => c['id'] == comentario['id']));
     } catch (e) {
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
@@ -338,7 +326,7 @@ Future<void> _adicionarComentario() async {
   }
 
   bool _eMeuComentario(Map<String, dynamic> comentario) =>
-      comentario['usuario_id'] == _usuario?.id;
+      comentario['usuario_id'] == _usuario?.id || _usuario?.role == 'admin';
 
   String _formatarData(String iso) {
     final dt = DateTime.parse(iso).toLocal();
@@ -356,10 +344,10 @@ Future<void> _adicionarComentario() async {
       context,
       '/leitura',
       arguments: {
-        'obraId':     widget.obraId,
+        'obraId': widget.obraId,
         'capituloId': cap.id,
-        'capitulo':   cap.titulo,
-        'titulo':     widget.titulo,
+        'capitulo': cap.titulo,
+        'titulo': widget.titulo,
       },
     );
   }
@@ -370,14 +358,13 @@ Future<void> _adicionarComentario() async {
 
   Widget _buildNavCapitulos(bool isDark, Color roxo) {
     final temAnterior = _capituloAnterior != null;
-    final temProximo  = _proximoCapitulo != null;
+    final temProximo = _proximoCapitulo != null;
 
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
       decoration: BoxDecoration(
         color: isDark ? const Color(0xFF1A1030) : Colors.white,
-        border:
-            Border(bottom: BorderSide(color: roxo.withOpacity(0.15))),
+        border: Border(bottom: BorderSide(color: roxo.withOpacity(0.15))),
         boxShadow: [
           BoxShadow(
               color: Colors.black.withOpacity(0.06),
@@ -399,8 +386,7 @@ Future<void> _adicionarComentario() async {
               : const SizedBox(),
         ),
         Container(
-          padding:
-              const EdgeInsets.symmetric(horizontal: 14, vertical: 6),
+          padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 6),
           decoration: BoxDecoration(
             color: roxo.withOpacity(0.10),
             borderRadius: BorderRadius.circular(20),
@@ -410,9 +396,7 @@ Future<void> _adicionarComentario() async {
                 ? 'Cap. ${_capitulos.firstWhere((c) => c.id == widget.capituloId, orElse: () => _capitulos.first).numero}'
                 : widget.capitulo,
             style: TextStyle(
-                color: roxo,
-                fontWeight: FontWeight.w800,
-                fontSize: 13),
+                color: roxo, fontWeight: FontWeight.w800, fontSize: 13),
           ),
         ),
         Expanded(
@@ -452,13 +436,11 @@ Future<void> _adicionarComentario() async {
           ];
 
     return Align(
-      alignment:
-          iconAtStart ? Alignment.centerLeft : Alignment.centerRight,
+      alignment: iconAtStart ? Alignment.centerLeft : Alignment.centerRight,
       child: GestureDetector(
         onTap: onTap,
         child: Container(
-          padding:
-              const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
           decoration: BoxDecoration(
             color: roxo.withOpacity(0.08),
             borderRadius: BorderRadius.circular(20),
@@ -466,11 +448,8 @@ Future<void> _adicionarComentario() async {
           ),
           child: DefaultTextStyle(
             style: TextStyle(
-                color: roxo,
-                fontWeight: FontWeight.w700,
-                fontSize: 12),
-            child:
-                Row(mainAxisSize: MainAxisSize.min, children: children),
+                color: roxo, fontWeight: FontWeight.w700, fontSize: 12),
+            child: Row(mainAxisSize: MainAxisSize.min, children: children),
           ),
         ),
       ),
@@ -482,7 +461,7 @@ Future<void> _adicionarComentario() async {
   // =========================================================
 
   Widget comentariosWidget() {
-    final roxo   = Theme.of(context).colorScheme.primary;
+    final roxo = Theme.of(context).colorScheme.primary;
     final isDark = Theme.of(context).brightness == Brightness.dark;
 
     return Container(
@@ -506,22 +485,19 @@ Future<void> _adicionarComentario() async {
               ? SizedBox(
                   width: double.infinity,
                   child: ElevatedButton.icon(
-                    onPressed: () =>
-                        _irParaCapitulo(_proximoCapitulo!),
+                    onPressed: () => _irParaCapitulo(_proximoCapitulo!),
                     style: ElevatedButton.styleFrom(
                       backgroundColor: roxo,
                       foregroundColor: Colors.white,
                       elevation: 0,
-                      padding:
-                          const EdgeInsets.symmetric(vertical: 14),
+                      padding: const EdgeInsets.symmetric(vertical: 14),
                       shape: RoundedRectangleBorder(
                           borderRadius: BorderRadius.circular(16)),
                     ),
                     icon: const Icon(Icons.arrow_forward_rounded),
                     label: Text(
                       'Próximo: ${_proximoCapitulo!.titulo}',
-                      style: const TextStyle(
-                          fontWeight: FontWeight.w700),
+                      style: const TextStyle(fontWeight: FontWeight.w700),
                     ),
                   ),
                 )
@@ -535,13 +511,11 @@ Future<void> _adicionarComentario() async {
                   child: Row(
                       mainAxisAlignment: MainAxisAlignment.center,
                       children: [
-                        Icon(Icons.check_circle_rounded,
-                            color: roxo, size: 20),
+                        Icon(Icons.check_circle_rounded, color: roxo, size: 20),
                         const SizedBox(width: 8),
                         Text('Último capítulo disponível',
                             style: TextStyle(
-                                color: roxo,
-                                fontWeight: FontWeight.w700)),
+                                color: roxo, fontWeight: FontWeight.w700)),
                       ]),
                 ),
         ),
@@ -550,9 +524,7 @@ Future<void> _adicionarComentario() async {
 
         Text('Comentários',
             style: TextStyle(
-                fontSize: 19,
-                fontWeight: FontWeight.w800,
-                color: roxo)),
+                fontSize: 19, fontWeight: FontWeight.w800, color: roxo)),
         const SizedBox(height: 12),
 
         // Campo de novo comentário
@@ -560,32 +532,29 @@ Future<void> _adicionarComentario() async {
           padding: const EdgeInsets.symmetric(horizontal: 12),
           child: TextField(
             controller: comentarioController,
-            style: TextStyle(
-                color: isDark ? Colors.white : Colors.black87),
+            style: TextStyle(color: isDark ? Colors.white : Colors.black87),
             maxLines: null,
             decoration: InputDecoration(
               hintText: 'Digite um comentário...',
-              hintStyle: TextStyle(
-                  color: isDark ? Colors.white38 : Colors.black38),
+              hintStyle:
+                  TextStyle(color: isDark ? Colors.white38 : Colors.black38),
               suffixIcon: _enviandoComentario
                   ? const Padding(
                       padding: EdgeInsets.all(12),
                       child: SizedBox(
                           width: 20,
                           height: 20,
-                          child: CircularProgressIndicator(
-                              strokeWidth: 2)),
+                          child: CircularProgressIndicator(strokeWidth: 2)),
                     )
                   : IconButton(
                       icon: Icon(Icons.send_rounded, color: roxo),
                       onPressed: _adicionarComentario,
                     ),
               filled: true,
-              fillColor: isDark
-                  ? const Color(0xFF231840)
-                  : const Color(0xFFF5F3FF),
-              contentPadding: const EdgeInsets.symmetric(
-                  horizontal: 16, vertical: 12),
+              fillColor:
+                  isDark ? const Color(0xFF231840) : const Color(0xFFF5F3FF),
+              contentPadding:
+                  const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
               border: OutlineInputBorder(
                   borderRadius: BorderRadius.circular(14),
                   borderSide: BorderSide.none),
@@ -608,25 +577,20 @@ Future<void> _adicionarComentario() async {
             padding: const EdgeInsets.all(24),
             child: Text(
               'Nenhum comentário ainda. Seja o primeiro!',
-              style: TextStyle(
-                  color: isDark ? Colors.white38 : Colors.black38),
+              style: TextStyle(color: isDark ? Colors.white38 : Colors.black38),
             ),
           )
         else
           ..._comentarios.map((comentario) {
             final eMeu = _eMeuComentario(comentario);
-            final nomeUsuario =
-                comentario['usuarios']?['nome'] ?? 'Usuário';
+            final nomeUsuario = comentario['usuarios']?['nome'] ?? 'Usuário';
             return Container(
-              margin: const EdgeInsets.symmetric(
-                  horizontal: 12, vertical: 5),
+              margin: const EdgeInsets.symmetric(horizontal: 12, vertical: 5),
               decoration: BoxDecoration(
-                color: isDark
-                    ? const Color(0xFF20172C)
-                    : const Color(0xFFF7F2FF),
+                color:
+                    isDark ? const Color(0xFF20172C) : const Color(0xFFF7F2FF),
                 borderRadius: BorderRadius.circular(16),
-                border:
-                    Border.all(color: roxo.withOpacity(0.10)),
+                border: Border.all(color: roxo.withOpacity(0.10)),
               ),
               child: Padding(
                 padding: const EdgeInsets.all(12),
@@ -644,13 +608,10 @@ Future<void> _adicionarComentario() async {
                       ),
                       const SizedBox(width: 8),
                       Text(
-                        _formatarData(
-                            comentario['criado_em'] ?? ''),
+                        _formatarData(comentario['criado_em'] ?? ''),
                         style: TextStyle(
                             fontSize: 11,
-                            color: isDark
-                                ? Colors.white38
-                                : Colors.black38),
+                            color: isDark ? Colors.white38 : Colors.black38),
                       ),
                       if (comentario['editado'] == 1 ||
                           comentario['editado'] == true)
@@ -660,27 +621,22 @@ Future<void> _adicionarComentario() async {
                             '(editado)',
                             style: TextStyle(
                                 fontSize: 10,
-                                color: isDark
-                                    ? Colors.white38
-                                    : Colors.black38),
+                                color:
+                                    isDark ? Colors.white38 : Colors.black38),
                           ),
                         ),
                       const Spacer(),
                       if (eMeu) ...[
                         GestureDetector(
-                          onTap: () =>
-                              _editarComentario(comentario),
-                          child: Icon(Icons.edit_rounded,
-                              color: roxo, size: 18),
+                          onTap: () => _editarComentario(comentario),
+                          child:
+                              Icon(Icons.edit_rounded, color: roxo, size: 18),
                         ),
                         const SizedBox(width: 8),
                         GestureDetector(
-                          onTap: () =>
-                              _excluirComentario(comentario),
-                          child: const Icon(
-                              Icons.delete_rounded,
-                              color: Colors.redAccent,
-                              size: 18),
+                          onTap: () => _excluirComentario(comentario),
+                          child: const Icon(Icons.delete_rounded,
+                              color: Colors.redAccent, size: 18),
                         ),
                       ],
                     ]),
@@ -691,9 +647,7 @@ Future<void> _adicionarComentario() async {
                       style: TextStyle(
                           fontSize: 14,
                           height: 1.4,
-                          color: isDark
-                              ? Colors.white
-                              : Colors.black87),
+                          color: isDark ? Colors.white : Colors.black87),
                     ),
                   ],
                 ),
@@ -713,20 +667,16 @@ Future<void> _adicionarComentario() async {
   @override
   Widget build(BuildContext context) {
     if (_carregando || controller == null) {
-      return const Scaffold(
-          body: Center(child: CircularProgressIndicator()));
+      return const Scaffold(body: Center(child: CircularProgressIndicator()));
     }
 
     final isDark = Theme.of(context).brightness == Brightness.dark;
-    final roxo =
-        isDark ? const Color(0xFF9F67FA) : const Color(0xFF7C3AED);
+    final roxo = isDark ? const Color(0xFF9F67FA) : const Color(0xFF7C3AED);
 
     return Scaffold(
-      backgroundColor:
-          isDark ? Colors.black : const Color(0xFFF7F4FB),
+      backgroundColor: isDark ? Colors.black : const Color(0xFFF7F4FB),
       appBar: AppBar(
-        backgroundColor:
-            isDark ? const Color(0xFF1A1030) : roxo,
+        backgroundColor: isDark ? const Color(0xFF1A1030) : roxo,
         foregroundColor: Colors.white,
         elevation: 0,
         title: Text(widget.capitulo,
@@ -740,11 +690,9 @@ Future<void> _adicionarComentario() async {
           ),
           IconButton(
             tooltip: modoClique ? 'Modo rolagem' : 'Modo toque',
-            icon: Icon(modoClique
-                ? Icons.swipe_rounded
-                : Icons.touch_app_rounded),
-            onPressed: () =>
-                _safeSetState(() => modoClique = !modoClique),
+            icon: Icon(
+                modoClique ? Icons.swipe_rounded : Icons.touch_app_rounded),
+            onPressed: () => _safeSetState(() => modoClique = !modoClique),
           ),
         ],
       ),
@@ -765,8 +713,7 @@ Future<void> _adicionarComentario() async {
                     if (index < _paginas.length) {
                       return _buildPaginaClique(index, isDark);
                     }
-                    return SingleChildScrollView(
-                        child: comentariosWidget());
+                    return SingleChildScrollView(child: comentariosWidget());
                   },
                 )
               : ListView.builder(
