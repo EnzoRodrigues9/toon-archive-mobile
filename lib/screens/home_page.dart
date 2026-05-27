@@ -5,6 +5,7 @@ import 'comunidade_page.dart';
 import 'downloads_page.dart';
 import '../repositories/favoritos_repository.dart';
 import '../services/auth_service.dart';
+import '../services/recomendacao_service.dart';
 import '../models/obra.dart';
 import '../models/usuario.dart';
 import '../repositories/obras_repository.dart';
@@ -28,9 +29,14 @@ class _HomePageState extends State<HomePage> {
   final _favoritosRepo = FavoritosRepository.instance;
   final _authService = AuthService();
   final _obrasRepo = ObrasRepository.instance;
+  final _recomendacaoService = RecomendacaoService.instance;
 
   List<Obra> _obras = [];
   List<Obra> _obrasFiltradas = [];
+  List<ObraRecomendada> _recomendacoes = [];
+  bool _carregandoRecomendacoes = false;
+  bool _recomendacoesFalharam = false;
+  bool _primeiraCarregaFeita = false;
 
   final List<Map<String, String>> banners = [
     {
@@ -79,6 +85,7 @@ class _HomePageState extends State<HomePage> {
     _usuario = usuario;
     _usuarioId = usuario?.id;
     await _carregarFavoritos();
+    if (_usuarioId != null) _carregarRecomendacoes();
   }
 
   void _iniciarBanner() {
@@ -108,15 +115,48 @@ class _HomePageState extends State<HomePage> {
     _filtrar(pesquisaController.text);
   }
 
+  Future<void> _carregarRecomendacoes() async {
+    if (_usuarioId == null) return;
+    setState(() {
+      _carregandoRecomendacoes = true;
+      _recomendacoesFalharam = false;
+    });
+    final resultado = await _recomendacaoService.recomendar(
+      usuarioId: _usuarioId!,
+      topN: 5,
+    );
+    debugPrint('RECOMENDACOES: ${resultado.length}');
+    if (!mounted) return;
+    setState(() {
+      _recomendacoes = resultado;
+      _carregandoRecomendacoes = false;
+      _primeiraCarregaFeita = true;
+      _recomendacoesFalharam = resultado.isEmpty;
+    });
+    _filtrar(pesquisaController.text);
+  }
+
   void _filtrar(String texto) {
+    // IDs das obras já recomendadas (para não repetir na lista principal)
+    final idsRecomendados = _recomendacoes.map((r) => r.obra.id).toSet();
+
     List<Obra> lista = _obras.where((o) {
       final t = o.titulo.toLowerCase(),
           d = (o.descricao ?? '').toLowerCase(),
           b = texto.toLowerCase();
       return t.contains(b) || d.contains(b);
     }).toList();
-    if (mostrarFavoritos)
+
+    if (mostrarFavoritos) {
       lista = lista.where((o) => _titulosFavoritos.contains(o.titulo)).toList();
+    } else {
+      // Na listagem geral, esconde obras que já aparecem nas recomendações
+      // (evita duplicatas visuais na mesma tela)
+      if (texto.isEmpty) {
+        lista = lista.where((o) => !idsRecomendados.contains(o.id)).toList();
+      }
+    }
+
     setState(() => _obrasFiltradas = lista);
   }
 
@@ -358,6 +398,18 @@ class _HomePageState extends State<HomePage> {
                     // ── Banner ──────────────────────────────
                     _buildBanner(isDark, roxo),
                     const SizedBox(height: 18),
+                    // ── Recomendações IA ─────────────────────
+                    // Mostra: enquanto carrega pela 1ª vez, ou se tiver resultado
+                    // Não mostra: se já tentou e não trouxe nada (falha de rede etc.)
+                    if (_carregandoRecomendacoes || _recomendacoes.isNotEmpty)
+                      _buildRecomendacoes(isDark, roxo),
+                    if (_carregandoRecomendacoes || _recomendacoes.isNotEmpty)
+                      const SizedBox(height: 18),
+                    // Botão discreto para tentar novamente quando falhou
+                    if (_primeiraCarregaFeita && _recomendacoesFalharam && !_carregandoRecomendacoes)
+                      _buildRecomendacaoFalhou(isDark, roxo),
+                    if (_primeiraCarregaFeita && _recomendacoesFalharam && !_carregandoRecomendacoes)
+                      const SizedBox(height: 18),
                     // ── Pesquisa ────────────────────────────
                     _buildPesquisa(isDark, roxo),
                     const SizedBox(height: 16),
@@ -403,6 +455,172 @@ class _HomePageState extends State<HomePage> {
       ),
     );
   }
+
+  Widget _buildRecomendacoes(bool isDark, Color roxo) {
+    final card = isDark ? const Color(0xFF1A1030) : Colors.white;
+
+    return Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+      // Cabeçalho
+      Row(children: [
+        Container(
+          padding: const EdgeInsets.all(6),
+          decoration: BoxDecoration(
+            gradient: LinearGradient(
+                colors: [roxo, const Color(0xFF9F67FA)],
+                begin: Alignment.topLeft,
+                end: Alignment.bottomRight),
+            borderRadius: BorderRadius.circular(8),
+          ),
+          child: const Icon(Icons.auto_awesome_rounded,
+              color: Colors.white, size: 15),
+        ),
+        const SizedBox(width: 8),
+        Text('Recomendado para você',
+            style: TextStyle(
+                fontSize: 16,
+                fontWeight: FontWeight.w800,
+                color: isDark ? Colors.white : Colors.black87)),
+        const SizedBox(width: 8),
+        Container(
+          padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 3),
+          decoration: BoxDecoration(
+            color: roxo.withOpacity(0.12),
+            borderRadius: BorderRadius.circular(999),
+          ),
+          child: Text('IA',
+              style: TextStyle(
+                  fontSize: 10, fontWeight: FontWeight.w800, color: roxo)),
+        ),
+        const Spacer(),
+        // Botão recarregar
+        if (!_carregandoRecomendacoes)
+          GestureDetector(
+            onTap: _carregarRecomendacoes,
+            child: Icon(Icons.refresh_rounded,
+                color: roxo.withOpacity(0.6), size: 18),
+          ),
+      ]),
+      const SizedBox(height: 12),
+
+      // Lista horizontal de cards de recomendação
+      _carregandoRecomendacoes
+          ? _shimmerRecomendacoes(isDark, roxo)
+          : SizedBox(
+              height: 200,
+              child: ListView.separated(
+                scrollDirection: Axis.horizontal,
+                itemCount: _recomendacoes.length,
+                separatorBuilder: (_, __) => const SizedBox(width: 10),
+                itemBuilder: (_, i) {
+                  final rec = _recomendacoes[i];
+                  return _cardRecomendacao(rec, isDark, roxo, card);
+                },
+              ),
+            ),
+    ]);
+  }
+
+  Widget _shimmerRecomendacoes(bool isDark, Color roxo) {
+    return SizedBox(
+      height: 200,
+      child: ListView.separated(
+        scrollDirection: Axis.horizontal,
+        itemCount: 4,
+        separatorBuilder: (_, __) => const SizedBox(width: 10),
+        itemBuilder: (_, __) => Container(
+          width: 130,
+          decoration: BoxDecoration(
+            color: isDark ? const Color(0xFF1A1030) : Colors.grey.shade200,
+            borderRadius: BorderRadius.circular(16),
+          ),
+          child: Center(
+            child: SizedBox(
+              width: 22,
+              height: 22,
+              child: CircularProgressIndicator(
+                  strokeWidth: 2, color: roxo.withOpacity(0.4)),
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _cardRecomendacao(
+      ObraRecomendada rec, bool isDark, Color roxo, Color card) {
+    final obra = rec.obra;
+    final porcentagem = (rec.score * 100).round();
+    final capaUrl = obra.capaUrl?.isNotEmpty == true ? obra.capaUrl! : null;
+
+    return GestureDetector(
+      onTap: () => Navigator.pushNamed(context, '/detalhe', arguments: {
+        'obraId': obra.id,
+        'titulo': obra.titulo,
+      }).then((_) => _carregarRecomendacoes()),
+      child: Container(
+        width: 130,
+        decoration: BoxDecoration(
+          color: card,
+          borderRadius: BorderRadius.circular(16),
+          border: Border.all(color: roxo.withOpacity(0.12)),
+          boxShadow: [
+            BoxShadow(
+                color: Colors.black.withOpacity(isDark ? 0.18 : 0.06),
+                blurRadius: 8,
+                offset: const Offset(0, 3)),
+          ],
+        ),
+        child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+          // Capa
+          ClipRRect(
+            borderRadius: const BorderRadius.vertical(top: Radius.circular(16)),
+            child: SizedBox(
+              height: 120,
+              width: double.infinity,
+              child: capaUrl != null
+                  ? Image.network(capaUrl,
+                      fit: BoxFit.cover,
+                      errorBuilder: (_, __, ___) => _capaPlaceholder(roxo))
+                  : _capaPlaceholder(roxo),
+            ),
+          ),
+
+          // Info
+          Padding(
+            padding: const EdgeInsets.fromLTRB(8, 7, 8, 8),
+            child:
+                Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+              Text(obra.titulo,
+                  maxLines: 2,
+                  overflow: TextOverflow.ellipsis,
+                  style: TextStyle(
+                      fontSize: 12,
+                      fontWeight: FontWeight.w700,
+                      height: 1.2,
+                      color: isDark ? Colors.white : Colors.black87)),
+              const SizedBox(height: 5),
+              // Score visual
+              Row(children: [
+                Icon(Icons.auto_awesome_rounded, size: 11, color: roxo),
+                const SizedBox(width: 3),
+                Text('$porcentagem% match',
+                    style: TextStyle(
+                        fontSize: 10,
+                        fontWeight: FontWeight.w700,
+                        color: roxo)),
+              ]),
+            ]),
+          ),
+        ]),
+      ),
+    );
+  }
+
+  Widget _capaPlaceholder(Color roxo) => Container(
+        color: roxo.withOpacity(0.12),
+        child:
+            Center(child: Icon(Icons.menu_book_rounded, color: roxo, size: 32)),
+      );
 
   Widget _buildBanner(bool isDark, Color roxo) => SizedBox(
         height: 200,
@@ -592,4 +810,38 @@ class _HomePageState extends State<HomePage> {
           ),
         ]),
       );
+
+  Widget _buildRecomendacaoFalhou(bool isDark, Color roxo) => GestureDetector(
+        onTap: _carregarRecomendacoes,
+        child: Container(
+          padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+          decoration: BoxDecoration(
+            color: isDark ? const Color(0xFF1A1030) : Colors.white,
+            borderRadius: BorderRadius.circular(14),
+            border: Border.all(color: roxo.withOpacity(0.15)),
+          ),
+          child: Row(children: [
+            Container(
+              padding: const EdgeInsets.all(6),
+              decoration: BoxDecoration(
+                color: roxo.withOpacity(0.10),
+                borderRadius: BorderRadius.circular(8),
+              ),
+              child: Icon(Icons.auto_awesome_rounded, color: roxo, size: 14),
+            ),
+            const SizedBox(width: 10),
+            Expanded(
+              child: Text(
+                'Recomendações indisponíveis. Toque para tentar novamente.',
+                style: TextStyle(
+                  fontSize: 12,
+                  color: isDark ? Colors.white54 : Colors.black45,
+                ),
+              ),
+            ),
+            Icon(Icons.refresh_rounded, color: roxo.withOpacity(0.6), size: 16),
+          ]),
+        ),
+      );
+
 }
