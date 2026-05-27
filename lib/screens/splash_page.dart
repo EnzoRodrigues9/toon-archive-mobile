@@ -44,7 +44,7 @@ class _SplashPageState extends State<SplashPage> {
                   fontWeight: FontWeight.w900,
                   letterSpacing: 3)),
           SizedBox(height: 6),
-          Text('Sua biblioteca de mangás',
+          Text('Sua biblioteca de obras',
               style: TextStyle(color: Colors.white60, fontSize: 13)),
           SizedBox(height: 36),
           SizedBox(

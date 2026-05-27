@@ -83,7 +83,7 @@ class _LoginPageState extends State<LoginPage> {
                     const Text('TOON ARCHIVE',
                         style: TextStyle(color: Colors.white, fontSize: 26, fontWeight: FontWeight.w900, letterSpacing: 3)),
                     const SizedBox(height: 6),
-                    Text('Sua biblioteca de mangás', style: TextStyle(color: Colors.white.withOpacity(0.7), fontSize: 14)),
+                    Text('Sua biblioteca de obras', style: TextStyle(color: Colors.white.withOpacity(0.7), fontSize: 14)),
                     const SizedBox(height: 40),
                     // Email
                     _campo(controller: _emailController, hint: 'Email', icon: Icons.email_outlined, tipo: TextInputType.emailAddress),

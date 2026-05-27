@@ -1,14 +1,14 @@
 import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
+import 'package:supabase_flutter/supabase_flutter.dart';
 
 import '../repositories/progresso_repository.dart';
 import '../repositories/paginas_repository.dart';
 import '../repositories/capitulos_repository.dart';
-
 import '../services/auth_service.dart';
-
 import '../models/pagina.dart';
 import '../models/capitulo.dart';
+import '../models/usuario.dart';
 
 import 'dart:io';
 
@@ -30,34 +30,36 @@ class LeituraPage extends StatefulWidget {
   State<LeituraPage> createState() => _LeituraPageState();
 }
 
-class _LeituraPageState extends State<LeituraPage> with WidgetsBindingObserver {
-  bool _disposed = false; // flag manual para evitar setState pós-dispose
-
+class _LeituraPageState extends State<LeituraPage>
+    with WidgetsBindingObserver {
+  bool _disposed = false;
   bool modoClique = false;
 
   PageController? controller;
 
   String? _usuarioId;
   String? _obraId;
+  Usuario? _usuario;
 
   final _paginasRepo   = PaginasRepository.instance;
   final _progressoRepo = ProgressoRepository.instance;
   final _authService   = AuthService();
   final _capitulosRepo = CapitulosRepository.instance;
+  final _supabase      = Supabase.instance.client;
 
   final TextEditingController comentarioController = TextEditingController();
-  final Map<String, List<Map<String, dynamic>>> comentariosPorCapitulo = {};
 
-  List<Pagina>   _paginas   = [];
-  List<Capitulo> _capitulos = [];
+  List<Pagina>             _paginas    = [];
+  List<Capitulo>           _capitulos  = [];
+  List<Map<String, dynamic>> _comentarios = [];
 
-  bool _carregando = true;
-  int  _paginaAtual = 1;
+  bool _carregando          = true;
+  bool _carregandoComentarios = false;
+  bool _enviandoComentario  = false;
+  int  _paginaAtual         = 1;
 
   Capitulo? _capituloAnterior;
   Capitulo? _proximoCapitulo;
-
-  // Guarda se _salvarProgresso já foi chamado para não duplicar
   bool _progressoSalvo = false;
 
   @override
@@ -85,14 +87,12 @@ class _LeituraPageState extends State<LeituraPage> with WidgetsBindingObserver {
     }
   }
 
-  // Evita salvar duas vezes (dispose + lifecycle)
   void _salvarProgressoUmaVez() {
     if (_progressoSalvo) return;
     _progressoSalvo = true;
     _salvarProgresso();
   }
 
-  // Wrapper seguro para setState — nunca chama após dispose
   void _safeSetState(VoidCallback fn) {
     if (_disposed || !mounted) return;
     setState(fn);
@@ -101,17 +101,16 @@ class _LeituraPageState extends State<LeituraPage> with WidgetsBindingObserver {
   Future<void> _inicializar() async {
     final usuario = await _authService.getUsuarioInterno();
     if (_disposed) return;
-
+    _usuario   = usuario;
     _usuarioId = usuario?.id;
     _obraId    = widget.obraId;
 
     await _carregarPaginas();
     if (_disposed) return;
-
     await _carregarCapitulos();
     if (_disposed) return;
-
     await _carregarProgresso();
+    await _carregarComentarios();
   }
 
   Future<void> _carregarPaginas() async {
@@ -123,12 +122,8 @@ class _LeituraPageState extends State<LeituraPage> with WidgetsBindingObserver {
   Future<void> _carregarCapitulos() async {
     final lista = await _capitulosRepo.listarPorObra(widget.obraId);
     if (_disposed) return;
-
-    // Sempre crescente — base canônica para navegação
     lista.sort((a, b) => a.numero.compareTo(b.numero));
-
     final indexAtual = lista.indexWhere((c) => c.id == widget.capituloId);
-
     _safeSetState(() {
       _capitulos        = lista;
       _capituloAnterior = indexAtual > 0 ? lista[indexAtual - 1] : null;
@@ -143,16 +138,12 @@ class _LeituraPageState extends State<LeituraPage> with WidgetsBindingObserver {
       _inicializarController();
       return;
     }
-
     final progresso = await _progressoRepo.buscarProgresso(
-      _usuarioId!, _obraId!,
-    );
+        _usuarioId!, _obraId!);
     if (_disposed) return;
-
     if (progresso != null && progresso.capituloId == widget.capituloId) {
       _paginaAtual = progresso.ultimaPagina;
     }
-
     _inicializarController();
   }
 
@@ -160,8 +151,7 @@ class _LeituraPageState extends State<LeituraPage> with WidgetsBindingObserver {
     if (_disposed) return;
     controller?.dispose();
     controller = PageController(
-      initialPage: _paginaAtual > 0 ? _paginaAtual - 1 : 0,
-    );
+        initialPage: _paginaAtual > 0 ? _paginaAtual - 1 : 0);
     _safeSetState(() => _carregando = false);
   }
 
@@ -191,6 +181,166 @@ class _LeituraPageState extends State<LeituraPage> with WidgetsBindingObserver {
   }
 
   // =========================================================
+  // COMENTÁRIOS — Supabase
+  // =========================================================
+
+  Future<void> _carregarComentarios() async {
+    _safeSetState(() => _carregandoComentarios = true);
+    try {
+      final rows = await _supabase
+          .from('comentarios')
+          .select('*, usuarios(nome)')
+          .eq('obra_id', widget.obraId)
+          .order('criado_em', ascending: true);
+
+      if (_disposed) return;
+      _safeSetState(() {
+        _comentarios = List<Map<String, dynamic>>.from(rows);
+        _carregandoComentarios = false;
+      });
+    } catch (e) {
+      if (_disposed) return;
+      _safeSetState(() => _carregandoComentarios = false);
+    }
+  }
+
+  Future<void> _adicionarComentario() async {
+    final texto = comentarioController.text.trim();
+    if (texto.isEmpty || _enviandoComentario) return;
+    if (_usuario == null) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+            content: Text('Faça login para comentar.')),
+      );
+      return;
+    }
+
+    _safeSetState(() => _enviandoComentario = true);
+    comentarioController.clear();
+
+    try {
+      final row = await _supabase.from('comentarios').insert({
+        'usuario_id': _usuario!.id,
+        'obra_id':    widget.obraId,
+        'conteudo':   texto,
+      }).select('*, usuarios(nome)').single();
+
+      if (_disposed) return;
+      _safeSetState(() {
+        _comentarios.add(row);
+        _enviandoComentario = false;
+      });
+    } catch (e) {
+      if (_disposed) return;
+      _safeSetState(() => _enviandoComentario = false);
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Erro ao comentar: $e')),
+      );
+    }
+  }
+
+  Future<void> _editarComentario(Map<String, dynamic> comentario) async {
+    comentarioController.text = comentario['conteudo'];
+    final salvar = await showDialog<bool>(
+      context: context,
+      builder: (_) => AlertDialog(
+        title: const Text('Editar comentário'),
+        content: TextField(
+            controller: comentarioController,
+            autofocus: true,
+            maxLines: null),
+        actions: [
+          TextButton(
+              onPressed: () => Navigator.pop(context, false),
+              child: const Text('Cancelar')),
+          TextButton(
+              onPressed: () => Navigator.pop(context, true),
+              child: const Text('Salvar')),
+        ],
+      ),
+    );
+
+    if (salvar != true || comentarioController.text.trim().isEmpty) {
+      comentarioController.clear();
+      return;
+    }
+
+    try {
+      await _supabase
+          .from('comentarios')
+          .update({
+            'conteudo':      comentarioController.text.trim(),
+            'editado':       1,
+            'atualizado_em': DateTime.now().toIso8601String(),
+          })
+          .eq('id', comentario['id']);
+
+      if (_disposed) return;
+      _safeSetState(() {
+        final i =
+            _comentarios.indexWhere((c) => c['id'] == comentario['id']);
+        if (i != -1) {
+          _comentarios[i]['conteudo'] =
+              comentarioController.text.trim();
+          _comentarios[i]['editado'] = 1;
+        }
+      });
+    } catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Erro ao editar: $e')),
+      );
+    }
+    comentarioController.clear();
+  }
+
+  Future<void> _excluirComentario(Map<String, dynamic> comentario) async {
+    final confirmar = await showDialog<bool>(
+      context: context,
+      builder: (_) => AlertDialog(
+        title: const Text('Excluir comentário'),
+        content:
+            const Text('Tem certeza que deseja excluir este comentário?'),
+        actions: [
+          TextButton(
+              onPressed: () => Navigator.pop(context, false),
+              child: const Text('Cancelar')),
+          TextButton(
+              onPressed: () => Navigator.pop(context, true),
+              child: const Text('Excluir',
+                  style: TextStyle(color: Colors.redAccent))),
+        ],
+      ),
+    );
+
+    if (confirmar != true) return;
+
+    try {
+      await _supabase
+          .from('comentarios')
+          .delete()
+          .eq('id', comentario['id']);
+
+      if (_disposed) return;
+      _safeSetState(() =>
+          _comentarios.removeWhere((c) => c['id'] == comentario['id']));
+    } catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Erro ao excluir: $e')),
+      );
+    }
+  }
+
+  bool _eMeuComentario(Map<String, dynamic> comentario) =>
+      comentario['usuario_id'] == _usuario?.id;
+
+  String _formatarData(String iso) {
+    final dt = DateTime.parse(iso).toLocal();
+    return DateFormat('dd/MM/yyyy HH:mm').format(dt);
+  }
+
+  // =========================================================
   // NAVEGAÇÃO ENTRE CAPÍTULOS
   // =========================================================
 
@@ -210,65 +360,6 @@ class _LeituraPageState extends State<LeituraPage> with WidgetsBindingObserver {
   }
 
   // =========================================================
-  // COMENTÁRIOS
-  // =========================================================
-
-  String get chaveComentario => '${widget.titulo}-${widget.capituloId}';
-  List<Map<String, dynamic>> get comentarios =>
-      comentariosPorCapitulo[chaveComentario] ?? [];
-
-  String formatarData(DateTime data) =>
-      DateFormat('dd/MM/yyyy HH:mm').format(data);
-
-  void adicionarComentario() {
-    if (comentarioController.text.trim().isEmpty) return;
-    _safeSetState(() {
-      comentariosPorCapitulo.putIfAbsent(chaveComentario, () => []);
-      comentariosPorCapitulo[chaveComentario]!.add({
-        'texto': comentarioController.text.trim(),
-        'data':  DateTime.now(),
-      });
-      comentarioController.clear();
-    });
-  }
-
-  void editarComentario(int index) {
-    comentarioController.text = comentarios[index]['texto'];
-    showDialog(
-      context: context,
-      builder: (_) => AlertDialog(
-        title: const Text('Editar comentário'),
-        content: TextField(controller: comentarioController),
-        actions: [
-          TextButton(
-            onPressed: () {
-              _safeSetState(() {
-                comentariosPorCapitulo[chaveComentario]![index]['texto'] =
-                    comentarioController.text.trim();
-              });
-              comentarioController.clear();
-              Navigator.pop(context);
-            },
-            child: const Text('Salvar'),
-          ),
-          TextButton(
-            onPressed: () {
-              comentarioController.clear();
-              Navigator.pop(context);
-            },
-            child: const Text('Cancelar'),
-          ),
-        ],
-      ),
-    );
-  }
-
-  void excluirComentario(int index) {
-    _safeSetState(() =>
-        comentariosPorCapitulo[chaveComentario]!.removeAt(index));
-  }
-
-  // =========================================================
   // BARRA NAVEGAÇÃO CAPÍTULOS
   // =========================================================
 
@@ -280,13 +371,13 @@ class _LeituraPageState extends State<LeituraPage> with WidgetsBindingObserver {
       padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
       decoration: BoxDecoration(
         color: isDark ? const Color(0xFF1A1030) : Colors.white,
-        border: Border(bottom: BorderSide(color: roxo.withOpacity(0.15))),
+        border:
+            Border(bottom: BorderSide(color: roxo.withOpacity(0.15))),
         boxShadow: [
           BoxShadow(
-            color: Colors.black.withOpacity(0.06),
-            blurRadius: 6,
-            offset: const Offset(0, 2),
-          ),
+              color: Colors.black.withOpacity(0.06),
+              blurRadius: 6,
+              offset: const Offset(0, 2))
         ],
       ),
       child: Row(children: [
@@ -303,7 +394,8 @@ class _LeituraPageState extends State<LeituraPage> with WidgetsBindingObserver {
               : const SizedBox(),
         ),
         Container(
-          padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 6),
+          padding:
+              const EdgeInsets.symmetric(horizontal: 14, vertical: 6),
           decoration: BoxDecoration(
             color: roxo.withOpacity(0.10),
             borderRadius: BorderRadius.circular(20),
@@ -313,10 +405,9 @@ class _LeituraPageState extends State<LeituraPage> with WidgetsBindingObserver {
                 ? 'Cap. ${_capitulos.firstWhere((c) => c.id == widget.capituloId, orElse: () => _capitulos.first).numero}'
                 : widget.capitulo,
             style: TextStyle(
-              color: roxo,
-              fontWeight: FontWeight.w800,
-              fontSize: 13,
-            ),
+                color: roxo,
+                fontWeight: FontWeight.w800,
+                fontSize: 13),
           ),
         ),
         Expanded(
@@ -356,11 +447,13 @@ class _LeituraPageState extends State<LeituraPage> with WidgetsBindingObserver {
           ];
 
     return Align(
-      alignment: iconAtStart ? Alignment.centerLeft : Alignment.centerRight,
+      alignment:
+          iconAtStart ? Alignment.centerLeft : Alignment.centerRight,
       child: GestureDetector(
         onTap: onTap,
         child: Container(
-          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+          padding:
+              const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
           decoration: BoxDecoration(
             color: roxo.withOpacity(0.08),
             borderRadius: BorderRadius.circular(20),
@@ -368,11 +461,11 @@ class _LeituraPageState extends State<LeituraPage> with WidgetsBindingObserver {
           ),
           child: DefaultTextStyle(
             style: TextStyle(
-              color: roxo,
-              fontWeight: FontWeight.w700,
-              fontSize: 12,
-            ),
-            child: Row(mainAxisSize: MainAxisSize.min, children: children),
+                color: roxo,
+                fontWeight: FontWeight.w700,
+                fontSize: 12),
+            child:
+                Row(mainAxisSize: MainAxisSize.min, children: children),
           ),
         ),
       ),
@@ -380,7 +473,7 @@ class _LeituraPageState extends State<LeituraPage> with WidgetsBindingObserver {
   }
 
   // =========================================================
-  // WIDGET COMENTÁRIOS + PRÓXIMO CAPÍTULO
+  // WIDGET COMENTÁRIOS
   // =========================================================
 
   Widget comentariosWidget() {
@@ -392,7 +485,8 @@ class _LeituraPageState extends State<LeituraPage> with WidgetsBindingObserver {
       child: Column(children: [
         const SizedBox(height: 12),
         Container(
-          width: 60, height: 4,
+          width: 60,
+          height: 4,
           decoration: BoxDecoration(
             color: roxo.withOpacity(0.35),
             borderRadius: BorderRadius.circular(999),
@@ -407,19 +501,22 @@ class _LeituraPageState extends State<LeituraPage> with WidgetsBindingObserver {
               ? SizedBox(
                   width: double.infinity,
                   child: ElevatedButton.icon(
-                    onPressed: () => _irParaCapitulo(_proximoCapitulo!),
+                    onPressed: () =>
+                        _irParaCapitulo(_proximoCapitulo!),
                     style: ElevatedButton.styleFrom(
                       backgroundColor: roxo,
                       foregroundColor: Colors.white,
                       elevation: 0,
-                      padding: const EdgeInsets.symmetric(vertical: 14),
+                      padding:
+                          const EdgeInsets.symmetric(vertical: 14),
                       shape: RoundedRectangleBorder(
                           borderRadius: BorderRadius.circular(16)),
                     ),
                     icon: const Icon(Icons.arrow_forward_rounded),
                     label: Text(
                       'Próximo: ${_proximoCapitulo!.titulo}',
-                      style: const TextStyle(fontWeight: FontWeight.w700),
+                      style: const TextStyle(
+                          fontWeight: FontWeight.w700),
                     ),
                   ),
                 )
@@ -430,94 +527,174 @@ class _LeituraPageState extends State<LeituraPage> with WidgetsBindingObserver {
                     color: roxo.withOpacity(0.08),
                     borderRadius: BorderRadius.circular(16),
                   ),
-                  child: Row(mainAxisAlignment: MainAxisAlignment.center, children: [
-                    Icon(Icons.check_circle_rounded, color: roxo, size: 20),
-                    const SizedBox(width: 8),
-                    Text('Último capítulo disponível',
-                        style: TextStyle(color: roxo, fontWeight: FontWeight.w700)),
-                  ]),
+                  child: Row(
+                      mainAxisAlignment: MainAxisAlignment.center,
+                      children: [
+                        Icon(Icons.check_circle_rounded,
+                            color: roxo, size: 20),
+                        const SizedBox(width: 8),
+                        Text('Último capítulo disponível',
+                            style: TextStyle(
+                                color: roxo,
+                                fontWeight: FontWeight.w700)),
+                      ]),
                 ),
         ),
 
         const SizedBox(height: 20),
 
-        // Título comentários
         Text('Comentários',
-            style: TextStyle(fontSize: 19, fontWeight: FontWeight.w800, color: roxo)),
+            style: TextStyle(
+                fontSize: 19,
+                fontWeight: FontWeight.w800,
+                color: roxo)),
+        const SizedBox(height: 12),
 
-        // Campo de comentário
+        // Campo de novo comentário
         Padding(
-          padding: const EdgeInsets.all(12),
+          padding: const EdgeInsets.symmetric(horizontal: 12),
           child: TextField(
             controller: comentarioController,
-            style: TextStyle(color: isDark ? Colors.white : Colors.black87),
+            style: TextStyle(
+                color: isDark ? Colors.white : Colors.black87),
+            maxLines: null,
             decoration: InputDecoration(
               hintText: 'Digite um comentário...',
               hintStyle: TextStyle(
                   color: isDark ? Colors.white38 : Colors.black38),
-              suffixIcon: IconButton(
-                icon: Icon(Icons.send_rounded, color: roxo),
-                onPressed: adicionarComentario,
-              ),
+              suffixIcon: _enviandoComentario
+                  ? const Padding(
+                      padding: EdgeInsets.all(12),
+                      child: SizedBox(
+                          width: 20,
+                          height: 20,
+                          child: CircularProgressIndicator(
+                              strokeWidth: 2)),
+                    )
+                  : IconButton(
+                      icon: Icon(Icons.send_rounded, color: roxo),
+                      onPressed: _adicionarComentario,
+                    ),
               filled: true,
               fillColor: isDark
                   ? const Color(0xFF231840)
                   : const Color(0xFFF5F3FF),
-              contentPadding:
-                  const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+              contentPadding: const EdgeInsets.symmetric(
+                  horizontal: 16, vertical: 12),
               border: OutlineInputBorder(
-                borderRadius: BorderRadius.circular(14),
-                borderSide: BorderSide.none,
-              ),
+                  borderRadius: BorderRadius.circular(14),
+                  borderSide: BorderSide.none),
               focusedBorder: OutlineInputBorder(
-                borderRadius: BorderRadius.circular(14),
-                borderSide: BorderSide(color: roxo, width: 1.2),
-              ),
+                  borderRadius: BorderRadius.circular(14),
+                  borderSide: BorderSide(color: roxo, width: 1.2)),
             ),
           ),
         ),
+        const SizedBox(height: 8),
 
         // Lista de comentários
-        ...comentarios.asMap().entries.map((entry) {
-          final index      = entry.key;
-          final comentario = entry.value;
-          return Container(
-            margin: const EdgeInsets.symmetric(horizontal: 12, vertical: 5),
-            decoration: BoxDecoration(
-              color: isDark
-                  ? const Color(0xFF20172C)
-                  : const Color(0xFFF7F2FF),
-              borderRadius: BorderRadius.circular(16),
-              border: Border.all(color: roxo.withOpacity(0.10)),
+        if (_carregandoComentarios)
+          Padding(
+            padding: const EdgeInsets.all(24),
+            child: CircularProgressIndicator(color: roxo),
+          )
+        else if (_comentarios.isEmpty)
+          Padding(
+            padding: const EdgeInsets.all(24),
+            child: Text(
+              'Nenhum comentário ainda. Seja o primeiro!',
+              style: TextStyle(
+                  color: isDark ? Colors.white38 : Colors.black38),
             ),
-            child: ListTile(
-              title: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text(comentario['texto'],
-                      style: TextStyle(
-                          color: isDark ? Colors.white : Colors.black87)),
-                  const SizedBox(height: 4),
-                  Text(formatarData(comentario['data']),
-                      style: TextStyle(
-                          fontSize: 11,
-                          color: isDark ? Colors.white54 : Colors.black45)),
-                ],
+          )
+        else
+          ..._comentarios.map((comentario) {
+            final eMeu = _eMeuComentario(comentario);
+            final nomeUsuario =
+                comentario['usuarios']?['nome'] ?? 'Usuário';
+            return Container(
+              margin: const EdgeInsets.symmetric(
+                  horizontal: 12, vertical: 5),
+              decoration: BoxDecoration(
+                color: isDark
+                    ? const Color(0xFF20172C)
+                    : const Color(0xFFF7F2FF),
+                borderRadius: BorderRadius.circular(16),
+                border:
+                    Border.all(color: roxo.withOpacity(0.10)),
               ),
-              trailing: Row(mainAxisSize: MainAxisSize.min, children: [
-                IconButton(
-                  icon: Icon(Icons.edit_rounded, color: roxo, size: 20),
-                  onPressed: () => editarComentario(index),
+              child: Padding(
+                padding: const EdgeInsets.all(12),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    // Cabeçalho: nome + hora + botões
+                    Row(children: [
+                      Text(
+                        nomeUsuario,
+                        style: TextStyle(
+                            color: roxo,
+                            fontWeight: FontWeight.w800,
+                            fontSize: 13),
+                      ),
+                      const SizedBox(width: 8),
+                      Text(
+                        _formatarData(
+                            comentario['criado_em'] ?? ''),
+                        style: TextStyle(
+                            fontSize: 11,
+                            color: isDark
+                                ? Colors.white38
+                                : Colors.black38),
+                      ),
+                      if (comentario['editado'] == 1 ||
+                          comentario['editado'] == true)
+                        Padding(
+                          padding: const EdgeInsets.only(left: 4),
+                          child: Text(
+                            '(editado)',
+                            style: TextStyle(
+                                fontSize: 10,
+                                color: isDark
+                                    ? Colors.white38
+                                    : Colors.black38),
+                          ),
+                        ),
+                      const Spacer(),
+                      if (eMeu) ...[
+                        GestureDetector(
+                          onTap: () =>
+                              _editarComentario(comentario),
+                          child: Icon(Icons.edit_rounded,
+                              color: roxo, size: 18),
+                        ),
+                        const SizedBox(width: 8),
+                        GestureDetector(
+                          onTap: () =>
+                              _excluirComentario(comentario),
+                          child: const Icon(
+                              Icons.delete_rounded,
+                              color: Colors.redAccent,
+                              size: 18),
+                        ),
+                      ],
+                    ]),
+                    const SizedBox(height: 6),
+                    // Conteúdo
+                    Text(
+                      comentario['conteudo'],
+                      style: TextStyle(
+                          fontSize: 14,
+                          height: 1.4,
+                          color: isDark
+                              ? Colors.white
+                              : Colors.black87),
+                    ),
+                  ],
                 ),
-                IconButton(
-                  icon: const Icon(Icons.delete_rounded,
-                      color: Colors.redAccent, size: 20),
-                  onPressed: () => excluirComentario(index),
-                ),
-              ]),
-            ),
-          );
-        }),
+              ),
+            );
+          }),
 
         const SizedBox(height: 24),
       ]),
@@ -532,17 +709,19 @@ class _LeituraPageState extends State<LeituraPage> with WidgetsBindingObserver {
   Widget build(BuildContext context) {
     if (_carregando || controller == null) {
       return const Scaffold(
-        body: Center(child: CircularProgressIndicator()),
-      );
+          body: Center(child: CircularProgressIndicator()));
     }
 
     final isDark = Theme.of(context).brightness == Brightness.dark;
-    final roxo   = isDark ? const Color(0xFF9F67FA) : const Color(0xFF7C3AED);
+    final roxo =
+        isDark ? const Color(0xFF9F67FA) : const Color(0xFF7C3AED);
 
     return Scaffold(
-      backgroundColor: isDark ? Colors.black : const Color(0xFFF7F4FB),
+      backgroundColor:
+          isDark ? Colors.black : const Color(0xFFF7F4FB),
       appBar: AppBar(
-        backgroundColor: isDark ? const Color(0xFF1A1030) : roxo,
+        backgroundColor:
+            isDark ? const Color(0xFF1A1030) : roxo,
         foregroundColor: Colors.white,
         elevation: 0,
         title: Text(widget.capitulo,
@@ -559,14 +738,13 @@ class _LeituraPageState extends State<LeituraPage> with WidgetsBindingObserver {
             icon: Icon(modoClique
                 ? Icons.swipe_rounded
                 : Icons.touch_app_rounded),
-            onPressed: () => _safeSetState(() => modoClique = !modoClique),
+            onPressed: () =>
+                _safeSetState(() => modoClique = !modoClique),
           ),
         ],
       ),
       body: Column(children: [
-        // Barra de navegação entre capítulos — sempre visível no topo
         _buildNavCapitulos(isDark, roxo),
-
         Expanded(
           child: modoClique
               ? PageView.builder(
@@ -613,16 +791,14 @@ class _LeituraPageState extends State<LeituraPage> with WidgetsBindingObserver {
         if (posicao > largura / 2) {
           if (index < _paginas.length - 1) {
             controller!.nextPage(
-              duration: const Duration(milliseconds: 300),
-              curve: Curves.easeInOut,
-            );
+                duration: const Duration(milliseconds: 300),
+                curve: Curves.easeInOut);
           }
         } else {
           if (index > 0) {
             controller!.previousPage(
-              duration: const Duration(milliseconds: 300),
-              curve: Curves.easeInOut,
-            );
+                duration: const Duration(milliseconds: 300),
+                curve: Curves.easeInOut);
           }
         }
       },
@@ -652,18 +828,14 @@ class _LeituraPageState extends State<LeituraPage> with WidgetsBindingObserver {
 
   Widget _buildImagem(Pagina pagina) {
     if (pagina.imagemLocal != null && pagina.imagemLocal!.isNotEmpty) {
-      return Image.file(
-        File(pagina.imagemLocal!),
+      return Image.file(File(pagina.imagemLocal!),
+          fit: BoxFit.fitWidth,
+          errorBuilder: (_, __, ___) =>
+              const Center(child: Text('Erro ao carregar página')));
+    }
+    return Image.network(pagina.imagemUrl,
         fit: BoxFit.fitWidth,
         errorBuilder: (_, __, ___) =>
-            const Center(child: Text('Erro ao carregar página')),
-      );
-    }
-    return Image.network(
-      pagina.imagemUrl,
-      fit: BoxFit.fitWidth,
-      errorBuilder: (_, __, ___) =>
-          const Center(child: Text('Erro ao carregar página')),
-    );
+            const Center(child: Text('Erro ao carregar página')));
   }
 }

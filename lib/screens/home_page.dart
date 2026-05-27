@@ -326,7 +326,7 @@ class _HomePageState extends State<HomePage> {
                                   fontSize: 18,
                                   fontWeight: FontWeight.w900,
                                   letterSpacing: 2)),
-                          Text('Sua biblioteca de mangás',
+                          Text('Sua biblioteca de obras',
                               style: TextStyle(
                                   color: Colors.white60, fontSize: 11)),
                         ]),
