@@ -19,10 +19,34 @@ class DatabaseHelper {
 
     return await openDatabase(
       path,
-      version: 1,
+      version: 2,
       onCreate: _onCreate,
       onOpen: _onOpen,
     );
+  }
+
+  Future<void> _onUpgrade(Database db, int oldVersion, int newVersion) async {
+    if (oldVersion < 2) {
+      await db.execute('''
+      CREATE TABLE IF NOT EXISTS generos (
+        id TEXT PRIMARY KEY,
+        nome TEXT NOT NULL UNIQUE,
+        categoria TEXT NOT NULL
+                   CHECK (categoria IN ('demografico','narrativo','tipo'))
+      )
+    ''');
+      await db.execute('''
+      CREATE TABLE IF NOT EXISTS obra_generos (
+        obra_id   TEXT NOT NULL REFERENCES obras(id)   ON DELETE CASCADE,
+        genero_id TEXT NOT NULL REFERENCES generos(id) ON DELETE CASCADE,
+        PRIMARY KEY (obra_id, genero_id)
+      )
+    ''');
+      await db.execute(
+          'CREATE INDEX IF NOT EXISTS idx_obra_generos_obra   ON obra_generos(obra_id)');
+      await db.execute(
+          'CREATE INDEX IF NOT EXISTS idx_obra_generos_genero ON obra_generos(genero_id)');
+    }
   }
 
   /// Habilita chaves estrangeiras toda vez que a conexão é aberta.
@@ -40,8 +64,8 @@ class DatabaseHelper {
 
   /// Retorna todos os comandos CREATE TABLE e CREATE INDEX na ordem correta.
   List<String> _schema() => [
-    // ── usuarios ──────────────────────────────────────────────
-    '''
+        // ── usuarios ──────────────────────────────────────────────
+        '''
     CREATE TABLE IF NOT EXISTS usuarios (
       id            TEXT PRIMARY KEY,
       firebase_uid  TEXT UNIQUE,
@@ -56,8 +80,8 @@ class DatabaseHelper {
     )
     ''',
 
-    // ── obras ─────────────────────────────────────────────────
-    '''
+        // ── obras ─────────────────────────────────────────────────
+        '''
     CREATE TABLE IF NOT EXISTS obras (
       id              TEXT PRIMARY KEY,
       titulo          TEXT UNIQUE NOT NULL,
@@ -74,8 +98,8 @@ class DatabaseHelper {
     )
     ''',
 
-    // ── capitulos ─────────────────────────────────────────────
-    '''
+        // ── capitulos ─────────────────────────────────────────────
+        '''
     CREATE TABLE IF NOT EXISTS capitulos (
       id                 TEXT PRIMARY KEY,
       obra_id            TEXT NOT NULL REFERENCES obras(id) ON DELETE CASCADE,
@@ -87,8 +111,8 @@ class DatabaseHelper {
     )
     ''',
 
-    // ── paginas ───────────────────────────────────────────────
-    '''
+        // ── paginas ───────────────────────────────────────────────
+        '''
     CREATE TABLE IF NOT EXISTS paginas (
       id           TEXT PRIMARY KEY,
       capitulo_id  TEXT NOT NULL REFERENCES capitulos(id) ON DELETE CASCADE,
@@ -99,8 +123,8 @@ class DatabaseHelper {
     )
     ''',
 
-    // ── favoritos ─────────────────────────────────────────────
-    '''
+        // ── favoritos ─────────────────────────────────────────────
+        '''
     CREATE TABLE IF NOT EXISTS favoritos (
       id         TEXT PRIMARY KEY,
       usuario_id TEXT NOT NULL REFERENCES usuarios(id) ON DELETE CASCADE,
@@ -110,8 +134,8 @@ class DatabaseHelper {
     )
     ''',
 
-    // ── downloads ─────────────────────────────────────────────
-    '''
+        // ── downloads ─────────────────────────────────────────────
+        '''
     CREATE TABLE IF NOT EXISTS downloads (
       id            TEXT PRIMARY KEY,
       usuario_id    TEXT NOT NULL REFERENCES usuarios(id)  ON DELETE CASCADE,
@@ -126,8 +150,8 @@ class DatabaseHelper {
     )
     ''',
 
-    // ── progresso_leitura ─────────────────────────────────────
-    '''
+        // ── progresso_leitura ─────────────────────────────────────
+        '''
     CREATE TABLE IF NOT EXISTS progresso_leitura (
       id            TEXT PRIMARY KEY,
       usuario_id    TEXT NOT NULL REFERENCES usuarios(id)  ON DELETE CASCADE,
@@ -139,8 +163,8 @@ class DatabaseHelper {
     )
     ''',
 
-    // ── historico_leitura ─────────────────────────────────────
-    '''
+        // ── historico_leitura ─────────────────────────────────────
+        '''
     CREATE TABLE IF NOT EXISTS historico_leitura (
       id           TEXT PRIMARY KEY,
       usuario_id   TEXT NOT NULL REFERENCES usuarios(id)  ON DELETE CASCADE,
@@ -151,8 +175,8 @@ class DatabaseHelper {
     )
     ''',
 
-    // ── avaliacoes ────────────────────────────────────────────
-    '''
+        // ── avaliacoes ────────────────────────────────────────────
+        '''
     CREATE TABLE IF NOT EXISTS avaliacoes (
       id         TEXT PRIMARY KEY,
       usuario_id TEXT NOT NULL REFERENCES usuarios(id) ON DELETE CASCADE,
@@ -164,8 +188,31 @@ class DatabaseHelper {
     )
     ''',
 
-    // ── comentarios ───────────────────────────────────────────
-    '''
+        // ── generos ───────────────────────────────────────────────
+        '''
+       CREATE TABLE IF NOT EXISTS generos (
+        id        TEXT PRIMARY KEY,
+        nome      TEXT NOT NULL UNIQUE,
+        categoria TEXT NOT NULL
+        CHECK (categoria IN ('demografico','narrativo','tipo'))
+)
+''',
+
+        // ── obra_generos ──────────────────────────────────────────
+        '''
+       CREATE TABLE IF NOT EXISTS obra_generos (
+       obra_id   TEXT NOT NULL REFERENCES obras(id)   ON DELETE CASCADE,
+       genero_id TEXT NOT NULL REFERENCES generos(id) ON DELETE CASCADE,
+       PRIMARY KEY (obra_id, genero_id)
+)
+''',
+
+        // índices novos (junto com os outros)
+        'CREATE INDEX IF NOT EXISTS idx_obra_generos_obra   ON obra_generos(obra_id)',
+        'CREATE INDEX IF NOT EXISTS idx_obra_generos_genero ON obra_generos(genero_id)',
+
+        // ── comentarios ───────────────────────────────────────────
+        '''
     CREATE TABLE IF NOT EXISTS comentarios (
       id            TEXT PRIMARY KEY,
       usuario_id    TEXT NOT NULL REFERENCES usuarios(id) ON DELETE CASCADE,
@@ -179,8 +226,8 @@ class DatabaseHelper {
     )
     ''',
 
-    // ── sync_log ──────────────────────────────────────────────
-    '''
+        // ── sync_log ──────────────────────────────────────────────
+        '''
     CREATE TABLE IF NOT EXISTS sync_log (
       id               TEXT PRIMARY KEY,
       usuario_id       TEXT NOT NULL REFERENCES usuarios(id) ON DELETE CASCADE,
@@ -194,34 +241,36 @@ class DatabaseHelper {
     )
     ''',
 
-    // ── índices ───────────────────────────────────────────────
-    'CREATE INDEX IF NOT EXISTS idx_obras_titulo      ON obras (titulo)',
-    'CREATE INDEX IF NOT EXISTS idx_obras_destaque    ON obras (destaque)',
-    'CREATE INDEX IF NOT EXISTS idx_obras_genero      ON obras (genero)',
-    'CREATE INDEX IF NOT EXISTS idx_capitulos_obra    ON capitulos (obra_id, numero)',
-    'CREATE INDEX IF NOT EXISTS idx_paginas_capitulo  ON paginas (capitulo_id, numero)',
-    'CREATE INDEX IF NOT EXISTS idx_favoritos_usuario ON favoritos (usuario_id)',
-    'CREATE INDEX IF NOT EXISTS idx_favoritos_obra    ON favoritos (obra_id)',
-    'CREATE INDEX IF NOT EXISTS idx_downloads_usuario ON downloads (usuario_id)',
-    'CREATE INDEX IF NOT EXISTS idx_downloads_status  ON downloads (status)',
-    'CREATE INDEX IF NOT EXISTS idx_progresso_usuario ON progresso_leitura (usuario_id)',
-    'CREATE INDEX IF NOT EXISTS idx_progresso_obra    ON progresso_leitura (obra_id)',
-    'CREATE INDEX IF NOT EXISTS idx_historico_usuario ON historico_leitura (usuario_id, concluido_em DESC)',
-    'CREATE INDEX IF NOT EXISTS idx_historico_obra    ON historico_leitura (obra_id)',
-    'CREATE INDEX IF NOT EXISTS idx_avaliacoes_obra   ON avaliacoes (obra_id)',
-    'CREATE INDEX IF NOT EXISTS idx_comentarios_obra  ON comentarios (obra_id, criado_em DESC)',
-    'CREATE INDEX IF NOT EXISTS idx_comentarios_pai   ON comentarios (parent_id)',
-    'CREATE INDEX IF NOT EXISTS idx_sync_pendente     ON sync_log (usuario_id, sincronizado)',
-  ];
+        // ── índices ───────────────────────────────────────────────
+        'CREATE INDEX IF NOT EXISTS idx_obras_titulo      ON obras (titulo)',
+        'CREATE INDEX IF NOT EXISTS idx_obras_destaque    ON obras (destaque)',
+        'CREATE INDEX IF NOT EXISTS idx_obras_genero      ON obras (genero)',
+        'CREATE INDEX IF NOT EXISTS idx_capitulos_obra    ON capitulos (obra_id, numero)',
+        'CREATE INDEX IF NOT EXISTS idx_paginas_capitulo  ON paginas (capitulo_id, numero)',
+        'CREATE INDEX IF NOT EXISTS idx_favoritos_usuario ON favoritos (usuario_id)',
+        'CREATE INDEX IF NOT EXISTS idx_favoritos_obra    ON favoritos (obra_id)',
+        'CREATE INDEX IF NOT EXISTS idx_downloads_usuario ON downloads (usuario_id)',
+        'CREATE INDEX IF NOT EXISTS idx_downloads_status  ON downloads (status)',
+        'CREATE INDEX IF NOT EXISTS idx_progresso_usuario ON progresso_leitura (usuario_id)',
+        'CREATE INDEX IF NOT EXISTS idx_progresso_obra    ON progresso_leitura (obra_id)',
+        'CREATE INDEX IF NOT EXISTS idx_historico_usuario ON historico_leitura (usuario_id, concluido_em DESC)',
+        'CREATE INDEX IF NOT EXISTS idx_historico_obra    ON historico_leitura (obra_id)',
+        'CREATE INDEX IF NOT EXISTS idx_avaliacoes_obra   ON avaliacoes (obra_id)',
+        'CREATE INDEX IF NOT EXISTS idx_comentarios_obra  ON comentarios (obra_id, criado_em DESC)',
+        'CREATE INDEX IF NOT EXISTS idx_comentarios_pai   ON comentarios (parent_id)',
+        'CREATE INDEX IF NOT EXISTS idx_sync_pendente     ON sync_log (usuario_id, sincronizado)',
+      ];
 
   // ── helpers genéricos ──────────────────────────────────────
 
   Future<int> insert(String table, Map<String, dynamic> data) async {
     final db = await database;
-    return await db.insert(table, data, conflictAlgorithm: ConflictAlgorithm.replace);
+    return await db.insert(table, data,
+        conflictAlgorithm: ConflictAlgorithm.replace);
   }
 
-  Future<int> update(String table, Map<String, dynamic> data, String where, List<dynamic> args) async {
+  Future<int> update(String table, Map<String, dynamic> data, String where,
+      List<dynamic> args) async {
     final db = await database;
     return await db.update(table, data, where: where, whereArgs: args);
   }
@@ -239,10 +288,12 @@ class DatabaseHelper {
     int? limit,
   }) async {
     final db = await database;
-    return await db.query(table, where: where, whereArgs: whereArgs, orderBy: orderBy, limit: limit);
+    return await db.query(table,
+        where: where, whereArgs: whereArgs, orderBy: orderBy, limit: limit);
   }
 
-  Future<List<Map<String, dynamic>>> rawQuery(String sql, [List<dynamic>? args]) async {
+  Future<List<Map<String, dynamic>>> rawQuery(String sql,
+      [List<dynamic>? args]) async {
     final db = await database;
     return await db.rawQuery(sql, args);
   }

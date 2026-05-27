@@ -6,6 +6,8 @@ import '../repositories/paginas_repository.dart';
 import '../services/auth_service.dart';
 import '../services/download_service.dart';
 import '../models/capitulo.dart';
+import '../repositories/generos_repository.dart';
+import '../models/genero.dart';
 import 'dart:io';
 
 class DetalhePage extends StatefulWidget {
@@ -21,6 +23,9 @@ class _DetalhePageState extends State<DetalhePage> {
   String? _usuarioId;
   // true = crescente (cap 1 → N), false = decrescente
   bool _ordemCrescente = true;
+
+  List<Genero> _generos = [];
+  final _generosRepo = GenerosRepository.instance;
 
   // Lista SEMPRE ordenada de forma canônica (crescente).
   // A exibição inverte conforme _ordemCrescente, mas a ordem real
@@ -48,7 +53,14 @@ class _DetalhePageState extends State<DetalhePage> {
     final u = await _authService.getUsuarioInterno();
     if (!mounted) return;
     _usuarioId = u?.id;
-    await Future.wait([_carregarFavorito(), _carregarCapitulos()]);
+    await Future.wait(
+        [_carregarFavorito(), _carregarCapitulos(), _carregarGeneros()]);
+  }
+
+  Future<void> _carregarGeneros() async {
+    final generos = await _generosRepo.listarPorObra(widget.obraId);
+    if (!mounted) return;
+    setState(() => _generos = generos);
   }
 
   Future<void> _carregarFavorito() async {
@@ -271,10 +283,43 @@ class _DetalhePageState extends State<DetalhePage> {
                   style: const TextStyle(
                       color: Colors.white70, fontSize: 13, height: 1.4)),
               const SizedBox(height: 14),
-              Wrap(spacing: 8, runSpacing: 6, children: [
-                _chip('${_capitulos.length} capítulos'),
-                _chip('Leitura rápida'),
+// Substitui o Wrap existente com _chip('${_capitulos.length} capítulos') etc.
+              Wrap(spacing: 6, runSpacing: 6, children: [
+                _chip('${_capitulos.length} cap.'),
+                // Tipo (Mangá, HQ...)
+                ..._generos
+                    .where((g) => g.categoria == 'tipo')
+                    .map((g) => _chip(g.nome)),
+                // Demográfico
+                ..._generos
+                    .where((g) => g.categoria == 'demografico')
+                    .map((g) => _chip(g.nome)),
               ]),
+              const SizedBox(height: 8),
+// Narrativos em linha separada com cor diferente
+              if (_generos.any((g) => g.categoria == 'narrativo'))
+                Wrap(
+                  spacing: 6,
+                  runSpacing: 4,
+                  children: _generos
+                      .where((g) => g.categoria == 'narrativo')
+                      .map((g) => Container(
+                            padding: const EdgeInsets.symmetric(
+                                horizontal: 10, vertical: 4),
+                            decoration: BoxDecoration(
+                              color: Colors.white.withOpacity(0.10),
+                              borderRadius: BorderRadius.circular(999),
+                              border: Border.all(
+                                  color: Colors.white.withOpacity(0.3)),
+                            ),
+                            child: Text(g.nome,
+                                style: const TextStyle(
+                                    color: Colors.white70,
+                                    fontSize: 11,
+                                    fontWeight: FontWeight.w600)),
+                          ))
+                      .toList(),
+                ),
             ]),
           ),
 
