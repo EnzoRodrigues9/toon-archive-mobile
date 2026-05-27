@@ -8,11 +8,9 @@ import '../core/database/supabase_client.dart';
 import '../models/usuario.dart';
 
 class AuthService {
-  // ── Firebase (apenas Google Sign-In) ──────────────────────
   final fb.FirebaseAuth _firebaseAuth = fb.FirebaseAuth.instance;
   final GoogleSignIn _googleSignIn = GoogleSignIn(scopes: ['email']);
 
-  // ── Supabase Auth (email/senha) ────────────────────────────
   SupabaseClient get _supabase => SupabaseClientHelper.client;
 
   final _uuid = const Uuid();
@@ -21,8 +19,6 @@ class AuthService {
   // CADASTRO COM EMAIL/SENHA
   // ──────────────────────────────────────────────────────────
 
-  /// Cria conta no Supabase Auth e persiste o usuário no SQLite.
-  /// Retorna null em caso de erro; o erro em string é retornado via [onErro].
   Future<Usuario?> cadastrar({
     required String nome,
     required String email,
@@ -33,7 +29,7 @@ class AuthService {
       final response = await _supabase.auth.signUp(
         email: email,
         password: senha,
-        data: {'nome': nome},
+        data: {'nome': nome, 'full_name': nome},
       );
 
       final supabaseUser = response.user;
@@ -89,7 +85,7 @@ class AuthService {
   }
 
   // ──────────────────────────────────────────────────────────
-  // LOGIN COM GOOGLE (Firebase → espelha no Supabase Auth)
+  // LOGIN COM GOOGLE
   // ──────────────────────────────────────────────────────────
 
   Future<Usuario?> signInWithGoogle({
@@ -99,8 +95,8 @@ class AuthService {
       fb.User? firebaseUser;
 
       if (kIsWeb) {
-        final credential = await _firebaseAuth
-            .signInWithPopup(fb.GoogleAuthProvider());
+        final credential =
+            await _firebaseAuth.signInWithPopup(fb.GoogleAuthProvider());
         firebaseUser = credential.user;
       } else {
         final googleUser = await _googleSignIn.signIn();
@@ -121,7 +117,6 @@ class AuthService {
         return null;
       }
 
-      // Persiste localmente usando o UID do Firebase como identificador
       return await _persistirUsuarioFirebase(firebaseUser);
     } catch (e) {
       debugPrint('Erro no login com Google: $e');
@@ -135,12 +130,10 @@ class AuthService {
   // ──────────────────────────────────────────────────────────
 
   Future<void> logout() async {
-    // Encerra sessão Supabase
     try {
       await _supabase.auth.signOut();
     } catch (_) {}
 
-    // Encerra sessão Firebase/Google se estava logado por Google
     try {
       if (!kIsWeb) await _googleSignIn.signOut();
       await _firebaseAuth.signOut();
@@ -151,43 +144,37 @@ class AuthService {
   // USUÁRIO ATUAL
   // ──────────────────────────────────────────────────────────
 
-  /// Retorna o usuário interno (model) do banco local.
-  /// Funciona para login por email/senha (Supabase) e Google (Firebase).
-Future<Usuario?> getUsuarioInterno() async {
-  try {
-    // 1. Tenta pelo Supabase Auth (email/senha)
-    final supabaseUser = _supabase.auth.currentUser;
-    if (supabaseUser != null) {
-      final rows = await DatabaseHelper.instance.query(
-        'usuarios',
-        where: 'id = ?',
-        whereArgs: [supabaseUser.id],
-      );
-      if (rows.isNotEmpty) return Usuario.fromMap(rows.first);
+  Future<Usuario?> getUsuarioInterno() async {
+    try {
+      final supabaseUser = _supabase.auth.currentUser;
+      if (supabaseUser != null) {
+        final rows = await DatabaseHelper.instance.query(
+          'usuarios',
+          where: 'id = ?',
+          whereArgs: [supabaseUser.id],
+        );
+        if (rows.isNotEmpty) return Usuario.fromMap(rows.first);
 
-      return await _persistirUsuarioSupabase(supabaseUser: supabaseUser)
-          .timeout(const Duration(seconds: 5));
+        return await _persistirUsuarioSupabase(supabaseUser: supabaseUser)
+            .timeout(const Duration(seconds: 5));
+      }
+
+      final firebaseUser = _firebaseAuth.currentUser;
+      if (firebaseUser != null) {
+        final rows = await DatabaseHelper.instance.query(
+          'usuarios',
+          where: 'firebase_uid = ?',
+          whereArgs: [firebaseUser.uid],
+        );
+        if (rows.isNotEmpty) return Usuario.fromMap(rows.first);
+      }
+
+      return null;
+    } catch (_) {
+      return null;
     }
-
-    // 2. Fallback: Google via Firebase
-    final firebaseUser = _firebaseAuth.currentUser;
-    if (firebaseUser != null) {
-      final rows = await DatabaseHelper.instance.query(
-        'usuarios',
-        where: 'firebase_uid = ?',
-        whereArgs: [firebaseUser.uid],
-      );
-      if (rows.isNotEmpty) return Usuario.fromMap(rows.first);
-    }
-
-    return null;
-  } catch (_) {
-    // Se qualquer coisa travar, retorna null → vai para login
-    return null;
   }
-}
 
-  /// Verifica se há alguma sessão ativa (Supabase ou Firebase).
   bool get estaLogado =>
       _supabase.auth.currentUser != null ||
       _firebaseAuth.currentUser != null;
@@ -196,8 +183,6 @@ Future<Usuario?> getUsuarioInterno() async {
   // PERSISTÊNCIA INTERNA
   // ──────────────────────────────────────────────────────────
 
-  /// Persiste usuário autenticado via Supabase Auth (email/senha).
-  /// O ID do Supabase Auth vira o `id` do model interno.
   Future<Usuario?> _persistirUsuarioSupabase({
     required User supabaseUser,
     String? nomeOverride,
@@ -205,13 +190,12 @@ Future<Usuario?> getUsuarioInterno() async {
     final db = DatabaseHelper.instance;
     final agora = DateTime.now();
 
-    final nomeMetadata =
+    final nome = nomeOverride ??
         supabaseUser.userMetadata?['nome'] as String? ??
         supabaseUser.userMetadata?['full_name'] as String? ??
         supabaseUser.email?.split('@').first ??
         'Usuário';
 
-    final nome = nomeOverride ?? nomeMetadata;
     final email = supabaseUser.email ?? '';
     final avatarUrl = supabaseUser.userMetadata?['avatar_url'] as String?;
 
@@ -240,7 +224,7 @@ Future<Usuario?> getUsuarioInterno() async {
       );
     } else {
       usuario = Usuario(
-        id: supabaseUser.id, // usa o UUID do Supabase Auth diretamente
+        id: supabaseUser.id,
         nome: nome,
         email: email,
         avatarUrl: avatarUrl,
@@ -252,13 +236,11 @@ Future<Usuario?> getUsuarioInterno() async {
       await db.insert('usuarios', usuario.toMap());
     }
 
-    // Espelha no Supabase (tabela pública `usuarios`)
-    _upsertUsuarioSupabase(usuario);
+    await _upsertUsuarioSupabase(usuario);
 
     return usuario;
   }
 
-  /// Persiste usuário autenticado via Firebase/Google.
   Future<Usuario?> _persistirUsuarioFirebase(fb.User firebaseUser) async {
     final db = DatabaseHelper.instance;
     final agora = DateTime.now();
@@ -301,19 +283,16 @@ Future<Usuario?> getUsuarioInterno() async {
       await db.insert('usuarios', usuario.toMap());
     }
 
-    _upsertUsuarioSupabase(usuario);
+    await _upsertUsuarioSupabase(usuario);
     return usuario;
   }
 
-  /// Fire-and-forget: espelha o usuário na tabela pública do Supabase.
-  void _upsertUsuarioSupabase(Usuario usuario) {
-    _supabase
-        .from('usuarios')
-        .upsert(usuario.toSupabase())
-        .then((_) {})
-        .catchError((e) {
-      debugPrint('Supabase upsert usuario falhou (offline?): $e');
-    });
+  Future<void> _upsertUsuarioSupabase(Usuario usuario) async {
+    try {
+      await _supabase.from('usuarios').upsert(usuario.toSupabase());
+    } catch (e) {
+      debugPrint('Supabase upsert usuario falhou: $e');
+    }
   }
 
   // ──────────────────────────────────────────────────────────
