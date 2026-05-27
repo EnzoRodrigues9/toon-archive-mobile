@@ -184,60 +184,65 @@ class _LeituraPageState extends State<LeituraPage>
   // COMENTÁRIOS — Supabase
   // =========================================================
 
-  Future<void> _carregarComentarios() async {
-    _safeSetState(() => _carregandoComentarios = true);
-    try {
-      final rows = await _supabase
-          .from('comentarios')
-          .select('*, usuarios(nome)')
-          .eq('obra_id', widget.obraId)
-          .order('criado_em', ascending: true);
+Future<void> _carregarComentarios() async {
+  _safeSetState(() => _carregandoComentarios = true);
+  try {
+    final rows = await _supabase
+        .from('comentarios')
+        .select('*, usuarios(nome)')
+        .eq('obra_id', widget.obraId)
+        .eq('capitulo_id', widget.capituloId) 
+        .order('criado_em', ascending: true);
 
-      if (_disposed) return;
-      _safeSetState(() {
-        _comentarios = List<Map<String, dynamic>>.from(rows);
-        _carregandoComentarios = false;
-      });
-    } catch (e) {
-      if (_disposed) return;
-      _safeSetState(() => _carregandoComentarios = false);
-    }
+    if (_disposed) return;
+    _safeSetState(() {
+      _comentarios = List<Map<String, dynamic>>.from(rows);
+      _carregandoComentarios = false;
+    });
+  } catch (e) {
+    if (_disposed) return;
+    _safeSetState(() => _carregandoComentarios = false);
+  }
+}
+
+Future<void> _adicionarComentario() async {
+  final texto = comentarioController.text.trim();
+  if (texto.isEmpty || _enviandoComentario) return;
+  if (_usuario == null) {
+    ScaffoldMessenger.of(context).showSnackBar(
+      const SnackBar(content: Text('Faça login para comentar.')),
+    );
+    return;
   }
 
-  Future<void> _adicionarComentario() async {
-    final texto = comentarioController.text.trim();
-    if (texto.isEmpty || _enviandoComentario) return;
-    if (_usuario == null) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-            content: Text('Faça login para comentar.')),
-      );
-      return;
-    }
+  _safeSetState(() => _enviandoComentario = true);
+  comentarioController.clear();
 
-    _safeSetState(() => _enviandoComentario = true);
-    comentarioController.clear();
+  try {
+    final row = await _supabase
+        .from('comentarios')
+        .insert({
+          'usuario_id':  _usuario!.id,
+          'obra_id':     widget.obraId,
+          'capitulo_id': widget.capituloId, 
+          'conteudo':    texto,
+        })
+        .select('*, usuarios(nome)')
+        .single();
 
-    try {
-      final row = await _supabase.from('comentarios').insert({
-        'usuario_id': _usuario!.id,
-        'obra_id':    widget.obraId,
-        'conteudo':   texto,
-      }).select('*, usuarios(nome)').single();
-
-      if (_disposed) return;
-      _safeSetState(() {
-        _comentarios.add(row);
-        _enviandoComentario = false;
-      });
-    } catch (e) {
-      if (_disposed) return;
-      _safeSetState(() => _enviandoComentario = false);
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('Erro ao comentar: $e')),
-      );
-    }
+    if (_disposed) return;
+    _safeSetState(() {
+      _comentarios.add(row);
+      _enviandoComentario = false;
+    });
+  } catch (e) {
+    if (_disposed) return;
+    _safeSetState(() => _enviandoComentario = false);
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(content: Text('Erro ao comentar: $e')),
+    );
   }
+}
 
   Future<void> _editarComentario(Map<String, dynamic> comentario) async {
     comentarioController.text = comentario['conteudo'];

@@ -77,12 +77,24 @@ class _GrupoChatPageState extends State<GrupoChatPage> {
           callback: (payload) {
             if (!mounted) return;
             final nova = payload.newRecord;
-            // evita duplicar mensagem própria que já foi adicionada otimisticamente
-            final jaExiste =
-                _mensagens.any((m) => m['id'] == nova['id']);
+            // Ignora se já existe (mensagem própria já adicionada otimisticamente)
+            final jaExiste = _mensagens.any((m) =>
+                m['id'] == nova['id'] ||
+                (m['usuario_id'] == nova['usuario_id'] &&
+                    m['conteudo'] == nova['conteudo'] &&
+                    m['id'].toString().startsWith('temp_')));
             if (!jaExiste) {
               setState(() => _mensagens.add(nova));
               _rolarParaBaixo();
+            } else {
+              // Substitui o temp pelo registro real se for mensagem própria
+              setState(() {
+                final i = _mensagens.indexWhere((m) =>
+                    m['id'].toString().startsWith('temp_') &&
+                    m['conteudo'] == nova['conteudo'] &&
+                    m['usuario_id'] == nova['usuario_id']);
+                if (i != -1) _mensagens[i] = nova;
+              });
             }
           },
         )
@@ -114,15 +126,42 @@ class _GrupoChatPageState extends State<GrupoChatPage> {
     setState(() => _enviando = true);
     _controller.clear();
 
+    // Adiciona otimisticamente na tela antes do Supabase confirmar
+    final mensagemTemp = {
+      'id': 'temp_${DateTime.now().millisecondsSinceEpoch}',
+      'grupo': widget.nomeGrupo,
+      'usuario_id': _usuario!.id,
+      'nome_usuario': _usuario!.nome,
+      'conteudo': texto,
+      'criado_em': DateTime.now().toIso8601String(),
+      'editado': false,
+    };
+    setState(() => _mensagens.add(mensagemTemp));
+    _rolarParaBaixo();
+
     try {
-      await _supabase.from('mensagens_grupo').insert({
-        'grupo':        widget.nomeGrupo,
-        'usuario_id':   _usuario!.id,
-        'nome_usuario': _usuario!.nome,
-        'conteudo':     texto,
+      final row = await _supabase
+          .from('mensagens_grupo')
+          .insert({
+            'grupo': widget.nomeGrupo,
+            'usuario_id': _usuario!.id,
+            'nome_usuario': _usuario!.nome,
+            'conteudo': texto,
+          })
+          .select()
+          .single();
+
+      if (!mounted) return;
+      // Substitui a mensagem temporária pelo registro real
+      setState(() {
+        final i = _mensagens.indexWhere((m) => m['id'] == mensagemTemp['id']);
+        if (i != -1) _mensagens[i] = row;
       });
     } catch (e) {
       if (!mounted) return;
+      // Remove a mensagem temporária em caso de erro
+      setState(
+          () => _mensagens.removeWhere((m) => m['id'] == mensagemTemp['id']));
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(content: Text('Erro ao enviar: $e')),
       );
@@ -163,8 +202,8 @@ class _GrupoChatPageState extends State<GrupoChatPage> {
     try {
       await _supabase
           .from('mensagens_grupo')
-          .update({'conteudo': _controller.text.trim(), 'editado': true})
-          .eq('id', msg['id']);
+          .update({'conteudo': _controller.text.trim(), 'editado': true}).eq(
+              'id', msg['id']);
 
       if (!mounted) return;
       setState(() {
@@ -206,10 +245,7 @@ class _GrupoChatPageState extends State<GrupoChatPage> {
     if (confirmar != true) return;
 
     try {
-      await _supabase
-          .from('mensagens_grupo')
-          .delete()
-          .eq('id', msg['id']);
+      await _supabase.from('mensagens_grupo').delete().eq('id', msg['id']);
 
       if (!mounted) return;
       setState(() => _mensagens.removeWhere((m) => m['id'] == msg['id']));
@@ -221,12 +257,24 @@ class _GrupoChatPageState extends State<GrupoChatPage> {
     }
   }
 
-  bool _eMinha(Map<String, dynamic> msg) =>
-      msg['usuario_id'] == _usuario?.id;
+  bool _eMinha(Map<String, dynamic> msg) => msg['usuario_id'] == _usuario?.id;
 
   String _formatarData(String iso) {
     final dt = DateTime.parse(iso).toLocal();
-    return DateFormat('HH:mm').format(dt);
+    final agora = DateTime.now();
+    final hoje = DateTime(agora.year, agora.month, agora.day);
+    final ontem = hoje.subtract(const Duration(days: 1));
+    final diaMensagem = DateTime(dt.year, dt.month, dt.day);
+
+    final hora = DateFormat('HH:mm').format(dt);
+
+    if (diaMensagem == hoje) {
+      return 'Hoje, $hora';
+    } else if (diaMensagem == ontem) {
+      return 'Ontem, $hora';
+    } else {
+      return DateFormat('dd/MM/yyyy').format(dt) + ', $hora';
+    }
   }
 
   @override
@@ -270,8 +318,7 @@ class _GrupoChatPageState extends State<GrupoChatPage> {
                               ? Alignment.centerRight
                               : Alignment.centerLeft,
                           child: Container(
-                            constraints:
-                                const BoxConstraints(maxWidth: 300),
+                            constraints: const BoxConstraints(maxWidth: 300),
                             margin: const EdgeInsets.only(bottom: 10),
                             padding: const EdgeInsets.all(12),
                             decoration: BoxDecoration(
@@ -285,31 +332,25 @@ class _GrupoChatPageState extends State<GrupoChatPage> {
                               borderRadius: BorderRadius.only(
                                 topLeft: const Radius.circular(18),
                                 topRight: const Radius.circular(18),
-                                bottomLeft:
-                                    Radius.circular(minha ? 18 : 4),
-                                bottomRight:
-                                    Radius.circular(minha ? 4 : 18),
+                                bottomLeft: Radius.circular(minha ? 18 : 4),
+                                bottomRight: Radius.circular(minha ? 4 : 18),
                               ),
                               border: Border.all(
-                                  color: roxo
-                                      .withOpacity(minha ? 0 : 0.14)),
+                                  color: roxo.withOpacity(minha ? 0 : 0.14)),
                               boxShadow: [
                                 BoxShadow(
-                                    color:
-                                        Colors.black.withOpacity(0.06),
+                                    color: Colors.black.withOpacity(0.06),
                                     blurRadius: 6,
                                     offset: const Offset(0, 2))
                               ],
                             ),
                             child: Column(
-                              crossAxisAlignment:
-                                  CrossAxisAlignment.start,
+                              crossAxisAlignment: CrossAxisAlignment.start,
                               children: [
                                 // Nome do usuário (só em mensagens alheias)
                                 if (!minha)
                                   Padding(
-                                    padding: const EdgeInsets.only(
-                                        bottom: 4),
+                                    padding: const EdgeInsets.only(bottom: 4),
                                     child: Text(
                                       msg['nome_usuario'] ?? 'Usuário',
                                       style: TextStyle(
@@ -339,17 +380,16 @@ class _GrupoChatPageState extends State<GrupoChatPage> {
                                         onTap: () => _editar(msg),
                                         child: Icon(Icons.edit_rounded,
                                             size: 16,
-                                            color: Colors.white
-                                                .withOpacity(0.7)),
+                                            color:
+                                                Colors.white.withOpacity(0.7)),
                                       ),
                                       const SizedBox(width: 2),
                                       GestureDetector(
                                         onTap: () => _excluir(msg),
-                                        child: Icon(
-                                            Icons.delete_rounded,
+                                        child: Icon(Icons.delete_rounded,
                                             size: 16,
-                                            color: Colors.white
-                                                .withOpacity(0.7)),
+                                            color:
+                                                Colors.white.withOpacity(0.7)),
                                       ),
                                     ],
                                   ],
@@ -358,13 +398,12 @@ class _GrupoChatPageState extends State<GrupoChatPage> {
                                 // Hora + editado
                                 Row(
                                   mainAxisSize: MainAxisSize.min,
-                                  mainAxisAlignment:
-                                      MainAxisAlignment.end,
+                                  mainAxisAlignment: MainAxisAlignment.end,
                                   children: [
                                     if (msg['editado'] == true)
                                       Padding(
-                                        padding: const EdgeInsets.only(
-                                            right: 4),
+                                        padding:
+                                            const EdgeInsets.only(right: 4),
                                         child: Text(
                                           'editado',
                                           style: TextStyle(
@@ -373,13 +412,11 @@ class _GrupoChatPageState extends State<GrupoChatPage> {
                                                   ? Colors.white54
                                                   : (isDark
                                                       ? Colors.white38
-                                                      : Colors
-                                                          .black38)),
+                                                      : Colors.black38)),
                                         ),
                                       ),
                                     Text(
-                                      _formatarData(
-                                          msg['criado_em'] ?? ''),
+                                      _formatarData(msg['criado_em'] ?? ''),
                                       style: TextStyle(
                                           fontSize: 10,
                                           color: minha
@@ -405,15 +442,14 @@ class _GrupoChatPageState extends State<GrupoChatPage> {
                 12, 8, 12, MediaQuery.of(context).viewInsets.bottom + 8),
             decoration: BoxDecoration(
               color: isDark ? const Color(0xFF1A1030) : Colors.white,
-              border:
-                  Border(top: BorderSide(color: roxo.withOpacity(0.12))),
+              border: Border(top: BorderSide(color: roxo.withOpacity(0.12))),
             ),
             child: Row(children: [
               Expanded(
                 child: TextField(
                   controller: _controller,
-                  style: TextStyle(
-                      color: isDark ? Colors.white : Colors.black87),
+                  style:
+                      TextStyle(color: isDark ? Colors.white : Colors.black87),
                   textInputAction: TextInputAction.send,
                   onSubmitted: (_) => _enviar(),
                   decoration: InputDecoration(
@@ -435,8 +471,7 @@ class _GrupoChatPageState extends State<GrupoChatPage> {
                         borderSide: BorderSide.none),
                     focusedBorder: OutlineInputBorder(
                         borderRadius: BorderRadius.circular(24),
-                        borderSide:
-                            BorderSide(color: roxo, width: 1.2)),
+                        borderSide: BorderSide(color: roxo, width: 1.2)),
                   ),
                 ),
               ),
@@ -446,8 +481,8 @@ class _GrupoChatPageState extends State<GrupoChatPage> {
                 child: Container(
                   padding: const EdgeInsets.all(12),
                   decoration: BoxDecoration(
-                    gradient: LinearGradient(
-                        colors: [roxo, const Color(0xFF9F67FA)]),
+                    gradient:
+                        LinearGradient(colors: [roxo, const Color(0xFF9F67FA)]),
                     shape: BoxShape.circle,
                   ),
                   child: _enviando
