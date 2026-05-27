@@ -1,79 +1,239 @@
 import 'package:flutter/material.dart';
-import 'package:shared_preferences/shared_preferences.dart';
-import '../data/biblioteca.dart';
+import 'package:intl/intl.dart';
+
+import '../repositories/progresso_repository.dart';
+import '../repositories/paginas_repository.dart';
+import '../repositories/capitulos_repository.dart';
+
+import '../services/auth_service.dart';
+
+import '../models/pagina.dart';
+import '../models/capitulo.dart';
+
+import 'dart:io';
 
 class LeituraPage extends StatefulWidget {
+  final String obraId;
+  final String capituloId;
   final String capitulo;
   final String titulo;
 
-  const LeituraPage({super.key, required this.capitulo, required this.titulo});
+  const LeituraPage({
+    super.key,
+    required this.obraId,
+    required this.capituloId,
+    required this.capitulo,
+    required this.titulo,
+  });
 
   @override
   State<LeituraPage> createState() => _LeituraPageState();
 }
 
-class _LeituraPageState extends State<LeituraPage> {
+class _LeituraPageState extends State<LeituraPage> with WidgetsBindingObserver {
+  bool _disposed = false; // flag manual para evitar setState pós-dispose
+
   bool modoClique = false;
+
   PageController? controller;
+
+  String? _usuarioId;
+  String? _obraId;
+
+  final _paginasRepo   = PaginasRepository.instance;
+  final _progressoRepo = ProgressoRepository.instance;
+  final _authService   = AuthService();
+  final _capitulosRepo = CapitulosRepository.instance;
+
   final TextEditingController comentarioController = TextEditingController();
-  final Map<String, List<String>> comentariosPorCapitulo = {};
-  String capituloAtual = '';
+  final Map<String, List<Map<String, dynamic>>> comentariosPorCapitulo = {};
+
+  List<Pagina>   _paginas   = [];
+  List<Capitulo> _capitulos = [];
+
+  bool _carregando = true;
+  int  _paginaAtual = 1;
+
+  Capitulo? _capituloAnterior;
+  Capitulo? _proximoCapitulo;
+
+  // Guarda se _salvarProgresso já foi chamado para não duplicar
+  bool _progressoSalvo = false;
 
   @override
   void initState() {
     super.initState();
-    carregarCapituloInicial();
+    WidgetsBinding.instance.addObserver(this);
+    _inicializar();
   }
 
   @override
   void dispose() {
+    _disposed = true;
+    WidgetsBinding.instance.removeObserver(this);
+    _salvarProgressoUmaVez();
     controller?.dispose();
     comentarioController.dispose();
     super.dispose();
   }
 
-  Future<void> carregarCapituloInicial() async {
-    final prefs = await SharedPreferences.getInstance();
-    final salvo = prefs.getString('${widget.titulo}_ultimo_capitulo');
-
-    if (!mounted) return;
-
-    setState(() {
-      capituloAtual = widget.capitulo.isNotEmpty
-          ? widget.capitulo
-          : (salvo ?? 'Capítulo 1');
-      controller = PageController(initialPage: 0);
-    });
-  }
-
-  Future<void> salvarCapitulo() async {
-    final prefs = await SharedPreferences.getInstance();
-    await prefs.setString('${widget.titulo}_ultimo_capitulo', capituloAtual);
-  }
-
-  List<String> get capitulos => biblioteca[widget.titulo]!.keys.toList();
-
-  List<String> getPaginas() =>
-      biblioteca[widget.titulo]?[capituloAtual] ?? ['assets/default.jpg'];
-
-  String get chaveComentario => '${widget.titulo}-$capituloAtual';
-
-  List<String> get comentarios => comentariosPorCapitulo[chaveComentario] ?? [];
-
-  void adicionarComentario() {
-    if (comentarioController.text.trim().isNotEmpty) {
-      setState(() {
-        comentariosPorCapitulo.putIfAbsent(chaveComentario, () => []);
-        comentariosPorCapitulo[chaveComentario]!.add(
-          comentarioController.text.trim(),
-        );
-        comentarioController.clear();
-      });
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (state == AppLifecycleState.paused ||
+        state == AppLifecycleState.inactive) {
+      _salvarProgressoUmaVez();
     }
   }
 
+  // Evita salvar duas vezes (dispose + lifecycle)
+  void _salvarProgressoUmaVez() {
+    if (_progressoSalvo) return;
+    _progressoSalvo = true;
+    _salvarProgresso();
+  }
+
+  // Wrapper seguro para setState — nunca chama após dispose
+  void _safeSetState(VoidCallback fn) {
+    if (_disposed || !mounted) return;
+    setState(fn);
+  }
+
+  Future<void> _inicializar() async {
+    final usuario = await _authService.getUsuarioInterno();
+    if (_disposed) return;
+
+    _usuarioId = usuario?.id;
+    _obraId    = widget.obraId;
+
+    await _carregarPaginas();
+    if (_disposed) return;
+
+    await _carregarCapitulos();
+    if (_disposed) return;
+
+    await _carregarProgresso();
+  }
+
+  Future<void> _carregarPaginas() async {
+    final paginas = await _paginasRepo.listarPorCapitulo(widget.capituloId);
+    if (_disposed) return;
+    _safeSetState(() => _paginas = paginas);
+  }
+
+  Future<void> _carregarCapitulos() async {
+    final lista = await _capitulosRepo.listarPorObra(widget.obraId);
+    if (_disposed) return;
+
+    // Sempre crescente — base canônica para navegação
+    lista.sort((a, b) => a.numero.compareTo(b.numero));
+
+    final indexAtual = lista.indexWhere((c) => c.id == widget.capituloId);
+
+    _safeSetState(() {
+      _capitulos        = lista;
+      _capituloAnterior = indexAtual > 0 ? lista[indexAtual - 1] : null;
+      _proximoCapitulo  = (indexAtual != -1 && indexAtual < lista.length - 1)
+          ? lista[indexAtual + 1]
+          : null;
+    });
+  }
+
+  Future<void> _carregarProgresso() async {
+    if (_usuarioId == null || _obraId == null) {
+      _inicializarController();
+      return;
+    }
+
+    final progresso = await _progressoRepo.buscarProgresso(
+      _usuarioId!, _obraId!,
+    );
+    if (_disposed) return;
+
+    if (progresso != null && progresso.capituloId == widget.capituloId) {
+      _paginaAtual = progresso.ultimaPagina;
+    }
+
+    _inicializarController();
+  }
+
+  void _inicializarController() {
+    if (_disposed) return;
+    controller?.dispose();
+    controller = PageController(
+      initialPage: _paginaAtual > 0 ? _paginaAtual - 1 : 0,
+    );
+    _safeSetState(() => _carregando = false);
+  }
+
+  Future<void> _salvarProgresso() async {
+    if (_usuarioId == null || _obraId == null) return;
+    try {
+      await _progressoRepo.salvarProgresso(
+        usuarioId:    _usuarioId!,
+        obraId:       _obraId!,
+        capituloId:   widget.capituloId,
+        ultimaPagina: _paginaAtual,
+      );
+    } catch (_) {}
+  }
+
+  Future<void> _marcarConcluidoSeNecessario(int indexPagina) async {
+    if (_usuarioId == null || _obraId == null) return;
+    if (indexPagina == _paginas.length - 1) {
+      try {
+        await _progressoRepo.marcarConcluido(
+          usuarioId:  _usuarioId!,
+          obraId:     _obraId!,
+          capituloId: widget.capituloId,
+        );
+      } catch (_) {}
+    }
+  }
+
+  // =========================================================
+  // NAVEGAÇÃO ENTRE CAPÍTULOS
+  // =========================================================
+
+  Future<void> _irParaCapitulo(Capitulo cap) async {
+    _salvarProgressoUmaVez();
+    if (!mounted) return;
+    Navigator.pushReplacementNamed(
+      context,
+      '/leitura',
+      arguments: {
+        'obraId':     widget.obraId,
+        'capituloId': cap.id,
+        'capitulo':   cap.titulo,
+        'titulo':     widget.titulo,
+      },
+    );
+  }
+
+  // =========================================================
+  // COMENTÁRIOS
+  // =========================================================
+
+  String get chaveComentario => '${widget.titulo}-${widget.capituloId}';
+  List<Map<String, dynamic>> get comentarios =>
+      comentariosPorCapitulo[chaveComentario] ?? [];
+
+  String formatarData(DateTime data) =>
+      DateFormat('dd/MM/yyyy HH:mm').format(data);
+
+  void adicionarComentario() {
+    if (comentarioController.text.trim().isEmpty) return;
+    _safeSetState(() {
+      comentariosPorCapitulo.putIfAbsent(chaveComentario, () => []);
+      comentariosPorCapitulo[chaveComentario]!.add({
+        'texto': comentarioController.text.trim(),
+        'data':  DateTime.now(),
+      });
+      comentarioController.clear();
+    });
+  }
+
   void editarComentario(int index) {
-    comentarioController.text = comentarios[index];
+    comentarioController.text = comentarios[index]['texto'];
     showDialog(
       context: context,
       builder: (_) => AlertDialog(
@@ -82,8 +242,8 @@ class _LeituraPageState extends State<LeituraPage> {
         actions: [
           TextButton(
             onPressed: () {
-              setState(() {
-                comentariosPorCapitulo[chaveComentario]![index] =
+              _safeSetState(() {
+                comentariosPorCapitulo[chaveComentario]![index]['texto'] =
                     comentarioController.text.trim();
               });
               comentarioController.clear();
@@ -104,296 +264,406 @@ class _LeituraPageState extends State<LeituraPage> {
   }
 
   void excluirComentario(int index) {
-    setState(() {
-      comentariosPorCapitulo[chaveComentario]!.removeAt(index);
-    });
+    _safeSetState(() =>
+        comentariosPorCapitulo[chaveComentario]!.removeAt(index));
   }
 
-  void mudarCapitulo(String novoCapitulo) {
-    setState(() {
-      capituloAtual = novoCapitulo;
-      controller?.dispose();
-      controller = PageController(initialPage: 0);
-    });
-    salvarCapitulo();
-  }
+  // =========================================================
+  // BARRA NAVEGAÇÃO CAPÍTULOS
+  // =========================================================
 
-  void proximoCapitulo() {
-    final index = capitulos.indexOf(capituloAtual);
-    if (index < capitulos.length - 1) {
-      mudarCapitulo(capitulos[index + 1]);
-    }
-  }
-
-  void capituloAnterior() {
-    final index = capitulos.indexOf(capituloAtual);
-    if (index > 0) {
-      mudarCapitulo(capitulos[index - 1]);
-    }
-  }
-
-  Widget comentariosWidget() {
-    final roxo = Theme.of(context).colorScheme.primary;
-    final isDark = Theme.of(context).brightness == Brightness.dark;
+  Widget _buildNavCapitulos(bool isDark, Color roxo) {
+    final temAnterior = _capituloAnterior != null;
+    final temProximo  = _proximoCapitulo != null;
 
     return Container(
-      color: isDark ? const Color(0xFF140F1F) : Colors.white,
-      child: Column(
-        children: [
-          const SizedBox(height: 12),
-          Container(
-            width: 60,
-            height: 4,
-            decoration: BoxDecoration(
-              color: roxo.withOpacity(0.35),
-              borderRadius: BorderRadius.circular(999),
-            ),
+      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+      decoration: BoxDecoration(
+        color: isDark ? const Color(0xFF1A1030) : Colors.white,
+        border: Border(bottom: BorderSide(color: roxo.withOpacity(0.15))),
+        boxShadow: [
+          BoxShadow(
+            color: Colors.black.withOpacity(0.06),
+            blurRadius: 6,
+            offset: const Offset(0, 2),
           ),
-          const SizedBox(height: 14),
-          Text(
-            'Comentários',
-            style: TextStyle(
-              fontSize: 19,
-              fontWeight: FontWeight.w800,
-              color: roxo,
-            ),
-          ),
-          Padding(
-            padding: const EdgeInsets.all(12),
-            child: TextField(
-              controller: comentarioController,
-              decoration: InputDecoration(
-                hintText: 'Digite um comentário...',
-                suffixIcon: IconButton(
-                  icon: Icon(Icons.send_rounded, color: roxo),
-                  onPressed: adicionarComentario,
-                ),
-              ),
-            ),
-          ),
-          ...comentarios.asMap().entries.map((entry) {
-            final index = entry.key;
-            final comentario = entry.value;
-
-            return Container(
-              margin: const EdgeInsets.symmetric(horizontal: 12, vertical: 5),
-              decoration: BoxDecoration(
-                color: isDark
-                    ? const Color(0xFF20172C)
-                    : const Color(0xFFF7F2FF),
-                borderRadius: BorderRadius.circular(16),
-                border: Border.all(color: roxo.withOpacity(0.10)),
-              ),
-              child: ListTile(
-                title: Text(comentario),
-                trailing: Row(
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    IconButton(
-                      icon: const Icon(Icons.edit_rounded),
-                      onPressed: () => editarComentario(index),
-                    ),
-                    IconButton(
-                      icon: const Icon(Icons.delete_rounded),
-                      onPressed: () => excluirComentario(index),
-                    ),
-                  ],
-                ),
-              ),
-            );
-          }),
-          const SizedBox(height: 18),
         ],
+      ),
+      child: Row(children: [
+        Expanded(
+          child: temAnterior
+              ? _navBtn(
+                  label: 'Cap. ${_capituloAnterior!.numero}',
+                  icon: Icons.arrow_back_ios_rounded,
+                  iconAtStart: true,
+                  roxo: roxo,
+                  isDark: isDark,
+                  onTap: () => _irParaCapitulo(_capituloAnterior!),
+                )
+              : const SizedBox(),
+        ),
+        Container(
+          padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 6),
+          decoration: BoxDecoration(
+            color: roxo.withOpacity(0.10),
+            borderRadius: BorderRadius.circular(20),
+          ),
+          child: Text(
+            _capitulos.isNotEmpty
+                ? 'Cap. ${_capitulos.firstWhere((c) => c.id == widget.capituloId, orElse: () => _capitulos.first).numero}'
+                : widget.capitulo,
+            style: TextStyle(
+              color: roxo,
+              fontWeight: FontWeight.w800,
+              fontSize: 13,
+            ),
+          ),
+        ),
+        Expanded(
+          child: temProximo
+              ? _navBtn(
+                  label: 'Cap. ${_proximoCapitulo!.numero}',
+                  icon: Icons.arrow_forward_ios_rounded,
+                  iconAtStart: false,
+                  roxo: roxo,
+                  isDark: isDark,
+                  onTap: () => _irParaCapitulo(_proximoCapitulo!),
+                )
+              : const SizedBox(),
+        ),
+      ]),
+    );
+  }
+
+  Widget _navBtn({
+    required String label,
+    required IconData icon,
+    required bool iconAtStart,
+    required Color roxo,
+    required bool isDark,
+    required VoidCallback onTap,
+  }) {
+    final children = iconAtStart
+        ? <Widget>[
+            Icon(icon, size: 14, color: roxo),
+            const SizedBox(width: 4),
+            Text(label),
+          ]
+        : <Widget>[
+            Text(label),
+            const SizedBox(width: 4),
+            Icon(icon, size: 14, color: roxo),
+          ];
+
+    return Align(
+      alignment: iconAtStart ? Alignment.centerLeft : Alignment.centerRight,
+      child: GestureDetector(
+        onTap: onTap,
+        child: Container(
+          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+          decoration: BoxDecoration(
+            color: roxo.withOpacity(0.08),
+            borderRadius: BorderRadius.circular(20),
+            border: Border.all(color: roxo.withOpacity(0.20)),
+          ),
+          child: DefaultTextStyle(
+            style: TextStyle(
+              color: roxo,
+              fontWeight: FontWeight.w700,
+              fontSize: 12,
+            ),
+            child: Row(mainAxisSize: MainAxisSize.min, children: children),
+          ),
+        ),
       ),
     );
   }
 
-  @override
-  Widget build(BuildContext context) {
-    if (controller == null || capituloAtual.isEmpty) {
-      return const Scaffold(body: Center(child: CircularProgressIndicator()));
-    }
+  // =========================================================
+  // WIDGET COMENTÁRIOS + PRÓXIMO CAPÍTULO
+  // =========================================================
 
-    final paginas = getPaginas();
+  Widget comentariosWidget() {
+    final roxo   = Theme.of(context).colorScheme.primary;
     final isDark = Theme.of(context).brightness == Brightness.dark;
 
-    // Roxo muda conforme o tema:
-    // light = mais escuro
-    // dark = mais claro
-    final Color roxoLeitura = isDark
-        ? const Color(0xFFB388FF)
-        : const Color(0xFF6D28D9);
+    return Container(
+      color: isDark ? const Color(0xFF140F1F) : Colors.white,
+      child: Column(children: [
+        const SizedBox(height: 12),
+        Container(
+          width: 60, height: 4,
+          decoration: BoxDecoration(
+            color: roxo.withOpacity(0.35),
+            borderRadius: BorderRadius.circular(999),
+          ),
+        ),
+        const SizedBox(height: 14),
+
+        // Botão próximo capítulo
+        Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 16),
+          child: _proximoCapitulo != null
+              ? SizedBox(
+                  width: double.infinity,
+                  child: ElevatedButton.icon(
+                    onPressed: () => _irParaCapitulo(_proximoCapitulo!),
+                    style: ElevatedButton.styleFrom(
+                      backgroundColor: roxo,
+                      foregroundColor: Colors.white,
+                      elevation: 0,
+                      padding: const EdgeInsets.symmetric(vertical: 14),
+                      shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(16)),
+                    ),
+                    icon: const Icon(Icons.arrow_forward_rounded),
+                    label: Text(
+                      'Próximo: ${_proximoCapitulo!.titulo}',
+                      style: const TextStyle(fontWeight: FontWeight.w700),
+                    ),
+                  ),
+                )
+              : Container(
+                  width: double.infinity,
+                  padding: const EdgeInsets.symmetric(vertical: 14),
+                  decoration: BoxDecoration(
+                    color: roxo.withOpacity(0.08),
+                    borderRadius: BorderRadius.circular(16),
+                  ),
+                  child: Row(mainAxisAlignment: MainAxisAlignment.center, children: [
+                    Icon(Icons.check_circle_rounded, color: roxo, size: 20),
+                    const SizedBox(width: 8),
+                    Text('Último capítulo disponível',
+                        style: TextStyle(color: roxo, fontWeight: FontWeight.w700)),
+                  ]),
+                ),
+        ),
+
+        const SizedBox(height: 20),
+
+        // Título comentários
+        Text('Comentários',
+            style: TextStyle(fontSize: 19, fontWeight: FontWeight.w800, color: roxo)),
+
+        // Campo de comentário
+        Padding(
+          padding: const EdgeInsets.all(12),
+          child: TextField(
+            controller: comentarioController,
+            style: TextStyle(color: isDark ? Colors.white : Colors.black87),
+            decoration: InputDecoration(
+              hintText: 'Digite um comentário...',
+              hintStyle: TextStyle(
+                  color: isDark ? Colors.white38 : Colors.black38),
+              suffixIcon: IconButton(
+                icon: Icon(Icons.send_rounded, color: roxo),
+                onPressed: adicionarComentario,
+              ),
+              filled: true,
+              fillColor: isDark
+                  ? const Color(0xFF231840)
+                  : const Color(0xFFF5F3FF),
+              contentPadding:
+                  const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+              border: OutlineInputBorder(
+                borderRadius: BorderRadius.circular(14),
+                borderSide: BorderSide.none,
+              ),
+              focusedBorder: OutlineInputBorder(
+                borderRadius: BorderRadius.circular(14),
+                borderSide: BorderSide(color: roxo, width: 1.2),
+              ),
+            ),
+          ),
+        ),
+
+        // Lista de comentários
+        ...comentarios.asMap().entries.map((entry) {
+          final index      = entry.key;
+          final comentario = entry.value;
+          return Container(
+            margin: const EdgeInsets.symmetric(horizontal: 12, vertical: 5),
+            decoration: BoxDecoration(
+              color: isDark
+                  ? const Color(0xFF20172C)
+                  : const Color(0xFFF7F2FF),
+              borderRadius: BorderRadius.circular(16),
+              border: Border.all(color: roxo.withOpacity(0.10)),
+            ),
+            child: ListTile(
+              title: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(comentario['texto'],
+                      style: TextStyle(
+                          color: isDark ? Colors.white : Colors.black87)),
+                  const SizedBox(height: 4),
+                  Text(formatarData(comentario['data']),
+                      style: TextStyle(
+                          fontSize: 11,
+                          color: isDark ? Colors.white54 : Colors.black45)),
+                ],
+              ),
+              trailing: Row(mainAxisSize: MainAxisSize.min, children: [
+                IconButton(
+                  icon: Icon(Icons.edit_rounded, color: roxo, size: 20),
+                  onPressed: () => editarComentario(index),
+                ),
+                IconButton(
+                  icon: const Icon(Icons.delete_rounded,
+                      color: Colors.redAccent, size: 20),
+                  onPressed: () => excluirComentario(index),
+                ),
+              ]),
+            ),
+          );
+        }),
+
+        const SizedBox(height: 24),
+      ]),
+    );
+  }
+
+  // =========================================================
+  // BUILD
+  // =========================================================
+
+  @override
+  Widget build(BuildContext context) {
+    if (_carregando || controller == null) {
+      return const Scaffold(
+        body: Center(child: CircularProgressIndicator()),
+      );
+    }
+
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+    final roxo   = isDark ? const Color(0xFF9F67FA) : const Color(0xFF7C3AED);
 
     return Scaffold(
       backgroundColor: isDark ? Colors.black : const Color(0xFFF7F4FB),
       appBar: AppBar(
-        backgroundColor: roxoLeitura,
+        backgroundColor: isDark ? const Color(0xFF1A1030) : roxo,
         foregroundColor: Colors.white,
         elevation: 0,
-
-        leadingWidth: 130,
-        leading: TextButton.icon(
-          style: TextButton.styleFrom(padding: const EdgeInsets.only(left: 8)),
-          onPressed: () {
-            final index = capitulos.indexOf(capituloAtual);
-
-            if (index > 0) {
-              capituloAnterior();
-            } else {
-              Navigator.pop(context);
-            }
-          },
-          icon: const Icon(Icons.arrow_back, color: Colors.white),
-          label: const Text('Anterior', style: TextStyle(color: Colors.white)),
-        ),
-
-        title: Text(
-          capituloAtual,
-          style: const TextStyle(fontWeight: FontWeight.w700),
-        ),
+        title: Text(widget.capitulo,
+            style: const TextStyle(fontWeight: FontWeight.w700)),
         centerTitle: true,
-
         actions: [
-          const SizedBox(width: 12),
-
           IconButton(
-            tooltip: 'Voltar para obra',
+            tooltip: 'Voltar',
             icon: const Icon(Icons.home_rounded),
             onPressed: () => Navigator.pop(context),
           ),
-
-          const SizedBox(width: 6),
-
-          // 🔁 MODO LEITURA
           IconButton(
-            tooltip: modoClique ? 'Modo toque' : 'Modo rolagem',
-            icon: Icon(
-              modoClique ? Icons.swipe_rounded : Icons.touch_app_rounded,
-            ),
-            onPressed: () => setState(() => modoClique = !modoClique),
-          ),
-
-          const SizedBox(width: 6),
-
-          // 👉 PRÓXIMO CAPÍTULO
-          Padding(
-            padding: const EdgeInsets.only(right: 6),
-            child: TextButton(
-              onPressed: proximoCapitulo,
-              child: const Row(
-                children: [
-                  Text('Próximo', style: TextStyle(color: Colors.white)),
-                  SizedBox(width: 4),
-                  Icon(Icons.arrow_forward, color: Colors.white),
-                ],
-              ),
-            ),
+            tooltip: modoClique ? 'Modo rolagem' : 'Modo toque',
+            icon: Icon(modoClique
+                ? Icons.swipe_rounded
+                : Icons.touch_app_rounded),
+            onPressed: () => _safeSetState(() => modoClique = !modoClique),
           ),
         ],
       ),
-      body: modoClique
-          ? PageView.builder(
-              key: ValueKey(capituloAtual),
-              controller: controller,
-              itemCount: paginas.length + 1,
-              itemBuilder: (context, index) {
-                if (index < paginas.length) {
-                  return GestureDetector(
-                    onTapUp: (details) {
-                      final largura = MediaQuery.of(context).size.width;
-                      final posicao = details.localPosition.dx;
+      body: Column(children: [
+        // Barra de navegação entre capítulos — sempre visível no topo
+        _buildNavCapitulos(isDark, roxo),
 
-                      if (posicao > largura / 2) {
-                        if (index < paginas.length - 1) {
-                          controller!.nextPage(
-                            duration: const Duration(milliseconds: 300),
-                            curve: Curves.easeInOut,
-                          );
-                        } else {
-                          controller!.animateToPage(
-                            paginas.length,
-                            duration: const Duration(milliseconds: 300),
-                            curve: Curves.easeInOut,
-                          );
-                        }
-                      } else {
-                        if (index > 0) {
-                          controller!.previousPage(
-                            duration: const Duration(milliseconds: 300),
-                            curve: Curves.easeInOut,
-                          );
-                        } else if (capitulos.indexOf(capituloAtual) > 0) {
-                          capituloAnterior();
-                        }
-                      }
-                    },
-                    child: Container(
-                      color: isDark ? Colors.black : const Color(0xFFF2F2F2),
-                      child: Center(
-                        child: InteractiveViewer(
-                          minScale: 1,
-                          maxScale: 4,
-                          child: Image.asset(
-                            paginas[index],
-                            fit: BoxFit.contain,
-                            errorBuilder: (context, error, stackTrace) {
-                              return const Center(
-                                child: Text('Erro ao carregar página'),
-                              );
-                            },
-                          ),
-                        ),
-                      ),
-                    ),
-                  );
-                } else {
-                  return GestureDetector(
-                    onHorizontalDragEnd: (details) {
-                      if ((details.primaryVelocity ?? 0) < 0) {
-                        proximoCapitulo();
-                      } else if ((details.primaryVelocity ?? 0) > 0) {
-                        capituloAnterior();
-                      }
-                    },
-                    onTapUp: (details) {
-                      if (details.localPosition.dx >
-                          MediaQuery.of(context).size.width / 2) {
-                        proximoCapitulo();
-                      } else {
-                        capituloAnterior();
-                      }
-                    },
-                    child: SingleChildScrollView(child: comentariosWidget()),
-                  );
-                }
-              },
-            )
-          : ListView.builder(
-              itemCount: paginas.length + 1,
-              itemBuilder: (context, index) {
-                if (index < paginas.length) {
-                  return Container(
-                    color: isDark ? Colors.black : const Color(0xFFF2F2F2),
-                    child: Padding(
-                      padding: const EdgeInsets.only(bottom: 10),
-                      child: Image.asset(
-                        paginas[index],
-                        width: double.infinity,
-                        fit: BoxFit.fitWidth,
-                        errorBuilder: (context, error, stackTrace) {
-                          return Container(
-                            height: 220,
-                            alignment: Alignment.center,
-                            child: const Text('Erro ao carregar página'),
-                          );
-                        },
-                      ),
-                    ),
-                  );
-                }
-                return comentariosWidget();
-              },
-            ),
+        Expanded(
+          child: modoClique
+              ? PageView.builder(
+                  controller: controller,
+                  itemCount: _paginas.length + 1,
+                  onPageChanged: (index) async {
+                    if (index < _paginas.length) {
+                      _paginaAtual = index + 1;
+                      await _marcarConcluidoSeNecessario(index);
+                    }
+                  },
+                  itemBuilder: (context, index) {
+                    if (index < _paginas.length) {
+                      return _buildPaginaClique(index, isDark);
+                    }
+                    return SingleChildScrollView(
+                        child: comentariosWidget());
+                  },
+                )
+              : ListView.builder(
+                  itemCount: _paginas.length + 1,
+                  itemBuilder: (context, index) {
+                    if (index < _paginas.length) {
+                      return _buildPaginaRolagem(index, isDark);
+                    }
+                    return comentariosWidget();
+                  },
+                ),
+        ),
+      ]),
+    );
+  }
+
+  // =========================================================
+  // HELPERS DE IMAGEM
+  // =========================================================
+
+  Widget _buildPaginaClique(int index, bool isDark) {
+    final pagina = _paginas[index];
+    return GestureDetector(
+      onTapUp: (details) {
+        final largura = MediaQuery.of(context).size.width;
+        final posicao = details.localPosition.dx;
+        if (posicao > largura / 2) {
+          if (index < _paginas.length - 1) {
+            controller!.nextPage(
+              duration: const Duration(milliseconds: 300),
+              curve: Curves.easeInOut,
+            );
+          }
+        } else {
+          if (index > 0) {
+            controller!.previousPage(
+              duration: const Duration(milliseconds: 300),
+              curve: Curves.easeInOut,
+            );
+          }
+        }
+      },
+      child: Container(
+        color: isDark ? Colors.black : const Color(0xFFF2F2F2),
+        child: Center(
+          child: InteractiveViewer(
+            minScale: 1,
+            maxScale: 4,
+            child: _buildImagem(pagina),
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _buildPaginaRolagem(int index, bool isDark) {
+    final pagina = _paginas[index];
+    return Container(
+      color: isDark ? Colors.black : const Color(0xFFF2F2F2),
+      child: Padding(
+        padding: const EdgeInsets.only(bottom: 10),
+        child: _buildImagem(pagina),
+      ),
+    );
+  }
+
+  Widget _buildImagem(Pagina pagina) {
+    if (pagina.imagemLocal != null && pagina.imagemLocal!.isNotEmpty) {
+      return Image.file(
+        File(pagina.imagemLocal!),
+        fit: BoxFit.fitWidth,
+        errorBuilder: (_, __, ___) =>
+            const Center(child: Text('Erro ao carregar página')),
+      );
+    }
+    return Image.network(
+      pagina.imagemUrl,
+      fit: BoxFit.fitWidth,
+      errorBuilder: (_, __, ___) =>
+          const Center(child: Text('Erro ao carregar página')),
     );
   }
 }

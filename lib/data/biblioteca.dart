@@ -16,4 +16,16 @@ Map<String, Map<String, List<String>>> biblioteca = {
     'Capítulo 2': ['assets/snk3.jpg', 'assets/snk4.jpg'],
     'Capítulo 3': ['assets/snk5.jpg', 'assets/snk6.jpg'],
   },
+
+  'Kagurabachi': {
+  'Capítulo 1': ['assets/kagurabachi1.jpg', 'assets/kagurabachi2.jpg'],
+  'Capítulo 2': ['assets/kagurabachi3.jpg', 'assets/kagurabachi4.jpg'],
+  'Capítulo 3': ['assets/kagurabachi5.jpg', 'assets/kagurabachi6.jpg'],
+  },
+
+  'Jujutsu Kaisen': {
+  'Capítulo 1': ['assets/jjk1.jpg', 'assets/jjk2.jpg'],
+  'Capítulo 2': ['assets/jjk3.jpg', 'assets/jjk4.jpg'],
+  'Capítulo 3': ['assets/jjk5.jpg', 'assets/jjk6.jpg'],
+  }
 };

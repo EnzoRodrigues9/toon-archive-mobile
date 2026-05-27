@@ -1,21 +1,24 @@
 import 'package:flutter/material.dart';
-import 'screens/home_page.dart';
-import 'routes/app_routes.dart';
 import 'package:firebase_core/firebase_core.dart';
+
 import 'firebase_options.dart';
+import 'core/database/database_helper.dart';
+import 'core/database/supabase_client.dart';
+import 'core/sync/sync_service.dart';
+import 'routes/app_routes.dart';
+import 'screens/splash_page.dart'; 
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
-  await Firebase.initializeApp(
-    options: DefaultFirebaseOptions.currentPlatform,
-  );
-
+  await Firebase.initializeApp(options: DefaultFirebaseOptions.currentPlatform);
+  await SupabaseClientHelper.init();
+  await DatabaseHelper.instance.database;
+  SyncService.instance.start();
   runApp(const ToonArchiveApp());
 }
 
 class ToonArchiveApp extends StatefulWidget {
   const ToonArchiveApp({super.key});
-
   @override
   State<ToonArchiveApp> createState() => _ToonArchiveAppState();
 }
@@ -23,100 +26,38 @@ class ToonArchiveApp extends StatefulWidget {
 class _ToonArchiveAppState extends State<ToonArchiveApp> {
   bool darkMode = false;
 
-  void alternarTema() {
-    setState(() {
-      darkMode = !darkMode;
-    });
+  void alternarTema() => setState(() => darkMode = !darkMode);
+
+  @override
+  void dispose() {
+    SyncService.instance.stop();
+    super.dispose();
   }
 
   @override
   Widget build(BuildContext context) {
     return MaterialApp(
-      initialRoute: AppRoutes.login,
-      routes: {
-        ...AppRoutes.routes,
-        AppRoutes.home: (_) => HomePage(alternarTema: alternarTema),
-      },
       debugShowCheckedModeBanner: false,
       title: 'Toon Archive',
+      initialRoute: '/splash',
+      onGenerateRoute: (s) => AppRoutes.onGenerateRoute(s, alternarTema),
       themeMode: darkMode ? ThemeMode.dark : ThemeMode.light,
       theme: ThemeData(
         useMaterial3: true,
-        brightness: Brightness.light,
-        scaffoldBackgroundColor: const Color(0xFFF6F2FF),
-        colorScheme: const ColorScheme.light(
-          primary: Color(0xFF8B5CF6), // 🔥 NOVO ROXO
-          secondary: Color(0xFFC4B5FD),
-          surface: Colors.white,
-        ),
-        appBarTheme: const AppBarTheme(
-          backgroundColor: Color(0xFF8B5CF6),
-          foregroundColor: Colors.white, // 🔥 resolve texto preto
-          elevation: 0,
-        ),
-        cardTheme: const CardThemeData(
-          color: Colors.white,
-          elevation: 0,
-          shape: RoundedRectangleBorder(
-            borderRadius: BorderRadius.all(Radius.circular(18)),
-            side: BorderSide(color: Color(0xFFE6D8FF)),
-          ),
-        ),
-        inputDecorationTheme: InputDecorationTheme(
-          filled: true,
-          fillColor: const Color(0xFFF8F4FF),
-          border: OutlineInputBorder(
-            borderRadius: BorderRadius.circular(16),
-            borderSide: BorderSide.none,
-          ),
-          enabledBorder: OutlineInputBorder(
-            borderRadius: BorderRadius.circular(16),
-            borderSide: const BorderSide(color: Color(0xFFD8C6FF)),
-          ),
-          focusedBorder: OutlineInputBorder(
-            borderRadius: BorderRadius.circular(16),
-            borderSide: const BorderSide(color: Color(0xFF5B21B6), width: 1.4),
-          ),
+        colorScheme: ColorScheme.fromSeed(seedColor: const Color(0xFF7C3AED)).copyWith(
+          primary: const Color(0xFF7C3AED),
+          secondary: const Color(0xFF9F67FA),
         ),
       ),
       darkTheme: ThemeData(
         useMaterial3: true,
         brightness: Brightness.dark,
-        scaffoldBackgroundColor: const Color(0xFF140F1F),
-        colorScheme: const ColorScheme.dark(
-          primary: Color(0xFFB388FF),
-          secondary: Color(0xFFD1C4E9),
-          surface: Color(0xFF20172C),
-        ),
-        appBarTheme: const AppBarTheme(
-          backgroundColor: Color(0xFF2A1D3D),
-          foregroundColor: Colors.white,
-          centerTitle: true,
-          elevation: 0,
-        ),
-        cardTheme: const CardThemeData(
-          color: const Color(0xFF20172C),
-          elevation: 0,
-          shape: RoundedRectangleBorder(
-            borderRadius: BorderRadius.all(Radius.circular(18)),
-            side: BorderSide(color: Color(0xFF3A2A55)),
-          ),
-        ),
-        inputDecorationTheme: InputDecorationTheme(
-          filled: true,
-          fillColor: const Color(0xFF241A35),
-          border: OutlineInputBorder(
-            borderRadius: BorderRadius.circular(16),
-            borderSide: BorderSide.none,
-          ),
-          enabledBorder: OutlineInputBorder(
-            borderRadius: BorderRadius.circular(16),
-            borderSide: const BorderSide(color: Color(0xFF4A3962)),
-          ),
-          focusedBorder: OutlineInputBorder(
-            borderRadius: BorderRadius.circular(16),
-            borderSide: const BorderSide(color: Color(0xFFB388FF), width: 1.4),
-          ),
+        colorScheme: ColorScheme.fromSeed(
+          seedColor: const Color(0xFF7C3AED),
+          brightness: Brightness.dark,
+        ).copyWith(
+          primary: const Color(0xFF9F67FA),
+          secondary: const Color(0xFF7C3AED),
         ),
       ),
     );

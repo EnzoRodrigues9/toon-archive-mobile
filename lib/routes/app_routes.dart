@@ -1,39 +1,69 @@
 import 'package:flutter/material.dart';
-
-// IMPORTS DAS TELAS
-import '../screens/login_page.dart';
 import '../screens/home_page.dart';
-import '../screens/comunidade_page.dart';
+import '../screens/login_page.dart';
 import '../screens/detalhe_page.dart';
-import '../screens/downloads_page.dart';
 import '../screens/leitura_page.dart';
 import '../screens/cadastro_page.dart';
+import '../screens/splash_page.dart';
 
 class AppRoutes {
-  // 🔐 AUTH
-  static const login = '/auth/login';
-
-  // 🏠 MAIN
+  static const splash = '/splash';
+  static const login = '/login';
   static const home = '/home';
-
-  // 📚 APP
   static const detalhe = '/detalhe';
   static const leitura = '/leitura';
-  static const downloads = '/downloads';
-  static const comunidade = '/comunidade';
   static const cadastro = '/cadastro';
 
-  // 📍 MAPA DE ROTAS
-  static Map<String, WidgetBuilder> get routes => {
-  login: (_) => const LoginPage(),
-  cadastro: (_) => const CadastroPage(),
-  home: (_) => HomePage(alternarTema: () {}),
-  comunidade: (_) => const ComunidadePage(),
-  downloads: (_) => const DownloadsPage(),
-  detalhe: (_) => const DetalhePage(titulo: ''),
-  leitura: (_) => const LeituraPage(
-    capitulo: 'Capítulo 1',
-    titulo: 'Naruto',
-  ),
-};
+  static Route<dynamic>? onGenerateRoute(
+    RouteSettings settings,
+    VoidCallback alternarTema,
+  ) {
+    switch (settings.name) {
+      case '/splash': 
+        return MaterialPageRoute(
+          builder: (_) => SplashPage(alternarTema: alternarTema),
+        );
+
+      case login:
+        return MaterialPageRoute(
+          builder: (_) => const LoginPage(),
+        );
+
+      case home:
+        return MaterialPageRoute(
+          builder: (_) => HomePage(
+            alternarTema: alternarTema,
+          ),
+        );
+
+      case cadastro:
+        return MaterialPageRoute(
+          builder: (_) => const CadastroPage(),
+        );
+
+      case detalhe:
+        final args = settings.arguments as Map<String, dynamic>;
+
+        return MaterialPageRoute(
+          builder: (_) => DetalhePage(
+            obraId: args['obraId'],
+            titulo: args['titulo'],
+          ),
+        );
+
+      case leitura:
+        final args = settings.arguments as Map<String, dynamic>;
+
+        return MaterialPageRoute(
+          builder: (_) => LeituraPage(
+            obraId: args['obraId'],
+            capituloId: args['capituloId'],
+            capitulo: args['capitulo'],
+            titulo: args['titulo'],
+          ),
+        );
+    }
+
+    return null;
+  }
 }

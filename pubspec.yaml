@@ -31,6 +31,7 @@ dependencies:
   flutter:
     sdk: flutter
     
+  intl: ^0.19.0
   # The following adds the Cupertino Icons font to your application.
   # Use with the CupertinoIcons class for iOS style icons.
   cupertino_icons: ^1.0.8
@@ -38,7 +39,15 @@ dependencies:
   firebase_core: ^4.7.0
   firebase_auth: ^6.4.0
   google_sign_in: ^6.2.1
-
+  supabase_flutter: ^2.9.1     # cliente Supabase
+  sqflite: ^2.4.2              # banco SQLite local
+  path: ^1.9.1
+  path_provider: ^2.1.5                 # localizar o arquivo do banco no dispositivo
+  dio: ^5.8.0+1
+  uuid: ^4.5.1                 # gerar UUIDs no Dart
+  connectivity_plus: ^6.1.5    # detectar se está online ou offline
+  flutter_dotenv: ^5.2.1       # ler o arquivo .env
+  
 dev_dependencies:
   flutter_test:
     sdk: flutter
