@@ -1,10 +1,14 @@
+import 'dart:convert';
+import 'package:crypto/crypto.dart';
 import 'package:firebase_auth/firebase_auth.dart' as fb;
 import 'package:google_sign_in/google_sign_in.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
+import 'package:connectivity_plus/connectivity_plus.dart';
 import 'package:flutter/foundation.dart';
 import 'package:uuid/uuid.dart';
 import '../core/database/database_helper.dart';
 import '../core/database/supabase_client.dart';
+import '../core/sync/sync_service.dart';
 import '../models/usuario.dart';
 
 class AuthService {
@@ -16,10 +20,40 @@ class AuthService {
   final _uuid = const Uuid();
 
   // ──────────────────────────────────────────────────────────
-  // CADASTRO COM EMAIL/SENHA
+  // UTILITÁRIOS
+  // ──────────────────────────────────────────────────────────
+
+  /// SHA-256 da senha — armazenado localmente para login offline.
+  String _hashSenha(String senha) =>
+      sha256.convert(utf8.encode(senha)).toString();
+
+  Future<bool> _online() async {
+    final r = await Connectivity().checkConnectivity();
+    return r.any((c) => c != ConnectivityResult.none);
+  }
+
+  // ──────────────────────────────────────────────────────────
+  // CADASTRO — online cria no Supabase; offline cria localmente
   // ──────────────────────────────────────────────────────────
 
   Future<Usuario?> cadastrar({
+    required String nome,
+    required String email,
+    required String senha,
+    void Function(String mensagem)? onErro,
+  }) async {
+    final online = await _online();
+
+    if (online) {
+      return _cadastrarOnline(
+          nome: nome, email: email, senha: senha, onErro: onErro);
+    } else {
+      return _cadastrarOffline(
+          nome: nome, email: email, senha: senha, onErro: onErro);
+    }
+  }
+
+  Future<Usuario?> _cadastrarOnline({
     required String nome,
     required String email,
     required String senha,
@@ -38,10 +72,22 @@ class AuthService {
         return null;
       }
 
-      return await _persistirUsuarioSupabase(
+      final usuario = await _persistirUsuarioSupabase(
         supabaseUser: supabaseUser,
         nomeOverride: nome,
       );
+
+      // Guarda hash local para login offline futuro
+      if (usuario != null) {
+        await DatabaseHelper.instance.update(
+          'usuarios',
+          {'senha_hash': _hashSenha(senha)},
+          'id = ?',
+          [usuario.id],
+        );
+      }
+
+      return usuario;
     } on AuthException catch (e) {
       onErro?.call(_traduzirErroSupabase(e.message));
       return null;
@@ -52,11 +98,101 @@ class AuthService {
     }
   }
 
+  /// Cria conta localmente e enfileira no sync_log para sincronizar quando
+  /// a conexão for restaurada.
+  Future<Usuario?> _cadastrarOffline({
+    required String nome,
+    required String email,
+    required String senha,
+    void Function(String mensagem)? onErro,
+  }) async {
+    final db = DatabaseHelper.instance;
+
+    // Verifica se já existe um usuário com esse email localmente
+    final existe = await db.query(
+      'usuarios',
+      where: 'email = ?',
+      whereArgs: [email],
+    );
+    if (existe.isNotEmpty) {
+      onErro?.call('Este email já está em uso neste dispositivo.');
+      return null;
+    }
+
+    // Verifica nome único
+    final nomeExiste = await db.query(
+      'usuarios',
+      where: 'LOWER(nome) = LOWER(?)',
+      whereArgs: [nome],
+    );
+    if (nomeExiste.isNotEmpty) {
+      onErro?.call('Este nome de usuário já está em uso neste dispositivo.');
+      return null;
+    }
+
+    final agora = DateTime.now();
+    final usuario = Usuario(
+      id: _uuid.v4(),
+      nome: nome,
+      email: email,
+      role: 'leitor',
+      ativo: true,
+      criadoEm: agora,
+      atualizadoEm: agora,
+    );
+
+    final mapa = usuario.toMap();
+    mapa['senha_hash'] = _hashSenha(senha);
+    mapa['criado_offline'] = 1; // flag auxiliar para sync
+
+    await db.insert('usuarios', mapa);
+
+    // Enfileira para criar no Supabase quando voltar online
+    await SyncService.instance.enfileirar(
+      usuarioId: usuario.id,
+      tabela: 'usuarios',
+      operacao: 'INSERT',
+      registroId: usuario.id,
+      payload: {
+        'id': usuario.id,
+        'nome': nome,
+        'email': email,
+        'role': 'leitor',
+        'ativo': true,
+        'criado_em': agora.toIso8601String(),
+        'atualizado_em': agora.toIso8601String(),
+      },
+    );
+
+    return usuario;
+  }
+
   // ──────────────────────────────────────────────────────────
-  // LOGIN COM EMAIL/SENHA
+  // LOGIN COM EMAIL OU NOME DE USUÁRIO
+  // Tenta Supabase se online; cai para SQLite se offline ou falha de rede
   // ──────────────────────────────────────────────────────────
 
   Future<Usuario?> loginComEmail({
+    required String email,
+    required String senha,
+    void Function(String mensagem)? onErro,
+  }) async {
+    // Detecta se o campo contém um email ou um nome de usuário
+    final isEmail = email.contains('@');
+
+    if (await _online()) {
+      if (isEmail) {
+        return _loginOnlineEmail(email: email, senha: senha, onErro: onErro);
+      } else {
+        return _loginOnlineNome(nome: email, senha: senha, onErro: onErro);
+      }
+    } else {
+      return _loginOffline(
+          identificador: email, senha: senha, isEmail: isEmail, onErro: onErro);
+    }
+  }
+
+  Future<Usuario?> _loginOnlineEmail({
     required String email,
     required String senha,
     void Function(String mensagem)? onErro,
@@ -73,15 +209,112 @@ class AuthService {
         return null;
       }
 
-      return await _persistirUsuarioSupabase(supabaseUser: supabaseUser);
+      final usuario =
+          await _persistirUsuarioSupabase(supabaseUser: supabaseUser);
+
+      // Atualiza hash local após login online com sucesso
+      if (usuario != null) {
+        await DatabaseHelper.instance.update(
+          'usuarios',
+          {'senha_hash': _hashSenha(senha)},
+          'id = ?',
+          [usuario.id],
+        );
+      }
+
+      return usuario;
     } on AuthException catch (e) {
       onErro?.call(_traduzirErroSupabase(e.message));
       return null;
     } catch (e) {
-      debugPrint('Erro no login com email: $e');
-      onErro?.call('Erro inesperado. Tente novamente.');
+      // Tenta offline como fallback
+      debugPrint('Login online falhou, tentando offline: $e');
+      return _loginOffline(
+          identificador: email, senha: senha, isEmail: true, onErro: onErro);
+    }
+  }
+
+  /// Login por nome de usuário: busca email no SQLite e autentica no Supabase.
+  Future<Usuario?> _loginOnlineNome({
+    required String nome,
+    required String senha,
+    void Function(String mensagem)? onErro,
+  }) async {
+    final db = DatabaseHelper.instance;
+
+    // Primeiro tenta encontrar o usuário pelo nome localmente
+    final rows = await db.query(
+      'usuarios',
+      where: 'LOWER(nome) = LOWER(?)',
+      whereArgs: [nome],
+    );
+
+    if (rows.isNotEmpty) {
+      final email = rows.first['email'] as String? ?? '';
+      if (email.isNotEmpty) {
+        return _loginOnlineEmail(email: email, senha: senha, onErro: onErro);
+      }
+    }
+
+    // Se não achou localmente, tenta no Supabase por nome
+    try {
+      final remoto = await _supabase
+          .from('usuarios')
+          .select('email')
+          .ilike('nome', nome)
+          .limit(1);
+
+      if (remoto.isNotEmpty) {
+        final emailRemoto = remoto.first['email'] as String? ?? '';
+        if (emailRemoto.isNotEmpty) {
+          return _loginOnlineEmail(
+              email: emailRemoto, senha: senha, onErro: onErro);
+        }
+      }
+    } catch (_) {}
+
+    onErro?.call('Usuário não encontrado.');
+    return null;
+  }
+
+  /// Login totalmente offline — valida senha_hash no SQLite.
+  Future<Usuario?> _loginOffline({
+    required String identificador,
+    required String senha,
+    required bool isEmail,
+    void Function(String mensagem)? onErro,
+  }) async {
+    final db = DatabaseHelper.instance;
+
+    final rows = await db.query(
+      'usuarios',
+      where: isEmail
+          ? 'email = ?'
+          : 'LOWER(nome) = LOWER(?)',
+      whereArgs: [identificador],
+    );
+
+    if (rows.isEmpty) {
+      onErro?.call(
+          'Usuário não encontrado. Faça login online pelo menos uma vez para habilitar acesso offline.');
       return null;
     }
+
+    final row = rows.first;
+    final hashSalvo = row['senha_hash'] as String?;
+
+    if (hashSalvo == null || hashSalvo.isEmpty) {
+      onErro?.call(
+          'Senha offline não configurada. Conecte-se à internet para fazer login.');
+      return null;
+    }
+
+    if (hashSalvo != _hashSenha(senha)) {
+      onErro?.call('Senha incorreta.');
+      return null;
+    }
+
+    return Usuario.fromMap(row);
   }
 
   // ──────────────────────────────────────────────────────────
@@ -91,6 +324,39 @@ class AuthService {
   Future<Usuario?> signInWithGoogle({
     void Function(String mensagem)? onErro,
   }) async {
+    // Google exige conexão — não há como autenticar offline pela primeira vez.
+    // Se já existe uma sessão Firebase ativa em cache, o SDK pode revalidá-la
+    // sem rede; caso contrário, informamos o usuário claramente.
+    if (!await _online()) {
+      // Tenta usar sessão Firebase já em cache (o SDK persiste o token localmente)
+      final cached = _firebaseAuth.currentUser;
+      if (cached != null) {
+        final rows = await DatabaseHelper.instance.query(
+          'usuarios',
+          where: 'firebase_uid = ?',
+          whereArgs: [cached.uid],
+        );
+        if (rows.isNotEmpty) return Usuario.fromMap(rows.first);
+      }
+
+      // Tenta usar sessão Supabase em cache
+      final supabaseCached = _supabase.auth.currentUser;
+      if (supabaseCached != null) {
+        final rows = await DatabaseHelper.instance.query(
+          'usuarios',
+          where: 'id = ?',
+          whereArgs: [supabaseCached.id],
+        );
+        if (rows.isNotEmpty) return Usuario.fromMap(rows.first);
+      }
+
+      onErro?.call(
+        'Login com Google requer conexão com a internet. '
+        'Use email e senha para entrar offline.',
+      );
+      return null;
+    }
+
     try {
       fb.User? firebaseUser;
 
@@ -120,7 +386,7 @@ class AuthService {
       return await _persistirUsuarioFirebase(firebaseUser);
     } catch (e) {
       debugPrint('Erro no login com Google: $e');
-      onErro?.call('Erro ao entrar com Google.');
+      onErro?.call('Erro ao entrar com Google. Verifique sua conexão.');
       return null;
     }
   }
@@ -169,6 +435,19 @@ class AuthService {
         if (rows.isNotEmpty) return Usuario.fromMap(rows.first);
       }
 
+      // Fallback: retorna o último usuário ativo registrado localmente.
+      // Cobre tanto contas criadas offline (criado_offline=1) quanto
+      // contas online que já fizeram login ao menos uma vez (criado_offline=0).
+      final localRows = await DatabaseHelper.instance.query(
+        'usuarios',
+        where: 'ativo = 1',
+        orderBy: 'atualizado_em DESC',
+        limit: 1,
+      );
+      if (localRows.isNotEmpty) {
+        return Usuario.fromMap(localRows.first);
+      }
+
       return null;
     } catch (_) {
       return null;
@@ -189,16 +468,34 @@ class AuthService {
     final db = DatabaseHelper.instance;
     final agora = DateTime.now();
 
+    // Resolve nome: prioriza override > metadados Supabase > nome salvo localmente > prefixo do email
+    // Isso evita substituir um nome já cadastrado pelo usuário com "Usuário" genérico
+    final metaNome = supabaseUser.userMetadata?['nome'] as String? ??
+        supabaseUser.userMetadata?['full_name'] as String?;
+
+    // Busca nome já salvo no SQLite para não perder em logins offline
+    String? nomeSalvoLocal;
+    try {
+      final savedRows = await DatabaseHelper.instance.query(
+        'usuarios',
+        where: 'id = ?',
+        whereArgs: [supabaseUser.id],
+      );
+      if (savedRows.isNotEmpty) {
+        nomeSalvoLocal = savedRows.first['nome'] as String?;
+      }
+    } catch (_) {}
+
     final nome = nomeOverride ??
-        supabaseUser.userMetadata?['nome'] as String? ??
-        supabaseUser.userMetadata?['full_name'] as String? ??
+        (metaNome?.isNotEmpty == true ? metaNome : null) ??
+        (nomeSalvoLocal?.isNotEmpty == true ? nomeSalvoLocal : null) ??
         supabaseUser.email?.split('@').first ??
         'Usuário';
 
     final email = supabaseUser.email ?? '';
     final avatarUrl = supabaseUser.userMetadata?['avatar_url'] as String?;
 
-    // ── Busca role atual no Supabase antes de qualquer coisa ──
+    // ── Busca role atual no Supabase ──────────────────────────
     String roleAtual = 'leitor';
     try {
       final rows = await _supabase
@@ -221,18 +518,22 @@ class AuthService {
     final Usuario usuario;
 
     if (localRows.isNotEmpty) {
+      // Preserva senha_hash existente
+      final hashExistente = localRows.first['senha_hash'] as String?;
       usuario = Usuario.fromMap(localRows.first).copyWith(
         nome: nome,
         avatarUrl: avatarUrl,
-        role: roleAtual, // <-- preserva o role real
+        role: roleAtual,
       );
       await db.update(
         'usuarios',
         {
           'nome': usuario.nome,
           'avatar_url': usuario.avatarUrl,
-          'role': roleAtual, // <-- atualiza localmente também
+          'role': roleAtual,
           'atualizado_em': agora.toIso8601String(),
+          'criado_offline': 0,
+          if (hashExistente != null) 'senha_hash': hashExistente,
         },
         'id = ?',
         [supabaseUser.id],
@@ -243,15 +544,18 @@ class AuthService {
         nome: nome,
         email: email,
         avatarUrl: avatarUrl,
-        role: roleAtual, // <-- usa o role do Supabase
+        role: roleAtual,
         ativo: true,
         criadoEm: agora,
         atualizadoEm: agora,
       );
-      await db.insert('usuarios', usuario.toMap());
+      await db.insert('usuarios', {
+        ...usuario.toMap(),
+        'criado_offline': 0,
+      });
     }
 
-    // Upsert sem sobrescrever o role
+    // Upsert sem sobrescrever role
     try {
       await _supabase.from('usuarios').upsert({
         'id': usuario.id,
@@ -259,7 +563,6 @@ class AuthService {
         'email': email,
         'avatar_url': avatarUrl,
         'atualizado_em': agora.toIso8601String(),
-        // role NÃO incluído — não sobrescreve
       }, onConflict: 'id');
     } catch (e) {
       debugPrint('Supabase upsert usuario falhou: $e');
@@ -291,6 +594,7 @@ class AuthService {
           'nome': usuario.nome,
           'avatar_url': usuario.avatarUrl,
           'atualizado_em': agora.toIso8601String(),
+          'criado_offline': 0,
         },
         'firebase_uid = ?',
         [firebaseUser.uid],
@@ -307,7 +611,10 @@ class AuthService {
         criadoEm: agora,
         atualizadoEm: agora,
       );
-      await db.insert('usuarios', usuario.toMap());
+      await db.insert('usuarios', {
+        ...usuario.toMap(),
+        'criado_offline': 0,
+      });
     }
 
     await _upsertUsuarioSupabase(usuario);
@@ -316,10 +623,6 @@ class AuthService {
 
   Future<void> _upsertUsuarioSupabase(Usuario usuario) async {
     try {
-      // ANTES: sobrescrevia o role
-      // await _supabase.from('usuarios').upsert(usuario.toSupabase());
-
-      // DEPOIS: usa upsert mas ignora o role (não sobrescreve)
       await _supabase.from('usuarios').upsert(
             usuario.toSupabase(),
             onConflict: 'id',

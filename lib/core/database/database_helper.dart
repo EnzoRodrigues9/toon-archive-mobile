@@ -19,7 +19,7 @@ class DatabaseHelper {
 
     return await openDatabase(
       path,
-      version: 3,
+      version: 4, // ← incrementado de 3 para 4
       onCreate: _onCreate,
       onUpgrade: _onUpgrade,
       onOpen: _onOpen,
@@ -50,10 +50,18 @@ class DatabaseHelper {
     if (oldVersion < 3) {
       await db.execute('ALTER TABLE obras ADD COLUMN banner_url TEXT');
     }
+    if (oldVersion < 4) {
+      // Suporte a login offline e cadastro offline
+      await db.execute(
+          'ALTER TABLE usuarios ADD COLUMN senha_hash TEXT');
+      await db.execute(
+          'ALTER TABLE usuarios ADD COLUMN criado_offline INTEGER NOT NULL DEFAULT 0');
+      await db.execute(
+          'CREATE INDEX IF NOT EXISTS idx_usuarios_nome ON usuarios (nome COLLATE NOCASE)');
+    }
   }
 
   /// Habilita chaves estrangeiras toda vez que a conexão é aberta.
-  /// O SQLite desliga isso por padrão em cada nova conexão.
   Future<void> _onOpen(Database db) async {
     await db.execute('PRAGMA foreign_keys = ON');
   }
@@ -65,21 +73,22 @@ class DatabaseHelper {
     }
   }
 
-  /// Retorna todos os comandos CREATE TABLE e CREATE INDEX na ordem correta.
   List<String> _schema() => [
         // ── usuarios ──────────────────────────────────────────────
         '''
     CREATE TABLE IF NOT EXISTS usuarios (
-      id            TEXT PRIMARY KEY,
-      firebase_uid  TEXT UNIQUE,
-      nome          TEXT NOT NULL,
-      email         TEXT UNIQUE NOT NULL,
-      avatar_url    TEXT,
-      role          TEXT NOT NULL DEFAULT 'leitor'
-                    CHECK (role IN ('leitor', 'admin', 'moderador')),
-      ativo         INTEGER NOT NULL DEFAULT 1 CHECK (ativo IN (0, 1)),
-      criado_em     TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
-      atualizado_em TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+      id              TEXT PRIMARY KEY,
+      firebase_uid    TEXT UNIQUE,
+      nome            TEXT NOT NULL,
+      email           TEXT UNIQUE NOT NULL,
+      avatar_url      TEXT,
+      role            TEXT NOT NULL DEFAULT 'leitor'
+                      CHECK (role IN ('leitor', 'admin', 'moderador')),
+      ativo           INTEGER NOT NULL DEFAULT 1 CHECK (ativo IN (0, 1)),
+      senha_hash      TEXT,
+      criado_offline  INTEGER NOT NULL DEFAULT 0,
+      criado_em       TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      atualizado_em   TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
     )
     ''',
 
@@ -93,7 +102,7 @@ CREATE TABLE IF NOT EXISTS obras (
   status          TEXT NOT NULL DEFAULT 'em_andamento'
                   CHECK (status IN ('em_andamento','completa','hiato','cancelada')),
   capa_url        TEXT,
-  banner_url      TEXT, 
+  banner_url      TEXT,
   autor           TEXT,
   total_capitulos INTEGER NOT NULL DEFAULT 0 CHECK (total_capitulos >= 0),
   destaque        INTEGER NOT NULL DEFAULT 0 CHECK (destaque IN (0, 1)),
@@ -211,7 +220,6 @@ CREATE TABLE IF NOT EXISTS obras (
 )
 ''',
 
-        // índices novos (junto com os outros)
         'CREATE INDEX IF NOT EXISTS idx_obra_generos_obra   ON obra_generos(obra_id)',
         'CREATE INDEX IF NOT EXISTS idx_obra_generos_genero ON obra_generos(genero_id)',
 
@@ -246,23 +254,24 @@ CREATE TABLE IF NOT EXISTS obras (
     ''',
 
         // ── índices ───────────────────────────────────────────────
-        'CREATE INDEX IF NOT EXISTS idx_obras_titulo      ON obras (titulo)',
-        'CREATE INDEX IF NOT EXISTS idx_obras_destaque    ON obras (destaque)',
-        'CREATE INDEX IF NOT EXISTS idx_obras_genero      ON obras (genero)',
-        'CREATE INDEX IF NOT EXISTS idx_capitulos_obra    ON capitulos (obra_id, numero)',
-        'CREATE INDEX IF NOT EXISTS idx_paginas_capitulo  ON paginas (capitulo_id, numero)',
-        'CREATE INDEX IF NOT EXISTS idx_favoritos_usuario ON favoritos (usuario_id)',
-        'CREATE INDEX IF NOT EXISTS idx_favoritos_obra    ON favoritos (obra_id)',
-        'CREATE INDEX IF NOT EXISTS idx_downloads_usuario ON downloads (usuario_id)',
-        'CREATE INDEX IF NOT EXISTS idx_downloads_status  ON downloads (status)',
-        'CREATE INDEX IF NOT EXISTS idx_progresso_usuario ON progresso_leitura (usuario_id)',
-        'CREATE INDEX IF NOT EXISTS idx_progresso_obra    ON progresso_leitura (obra_id)',
-        'CREATE INDEX IF NOT EXISTS idx_historico_usuario ON historico_leitura (usuario_id, concluido_em DESC)',
-        'CREATE INDEX IF NOT EXISTS idx_historico_obra    ON historico_leitura (obra_id)',
-        'CREATE INDEX IF NOT EXISTS idx_avaliacoes_obra   ON avaliacoes (obra_id)',
-        'CREATE INDEX IF NOT EXISTS idx_comentarios_obra  ON comentarios (obra_id, criado_em DESC)',
-        'CREATE INDEX IF NOT EXISTS idx_comentarios_pai   ON comentarios (parent_id)',
-        'CREATE INDEX IF NOT EXISTS idx_sync_pendente     ON sync_log (usuario_id, sincronizado)',
+        'CREATE INDEX IF NOT EXISTS idx_usuarios_nome      ON usuarios (nome COLLATE NOCASE)',
+        'CREATE INDEX IF NOT EXISTS idx_obras_titulo       ON obras (titulo)',
+        'CREATE INDEX IF NOT EXISTS idx_obras_destaque     ON obras (destaque)',
+        'CREATE INDEX IF NOT EXISTS idx_obras_genero       ON obras (genero)',
+        'CREATE INDEX IF NOT EXISTS idx_capitulos_obra     ON capitulos (obra_id, numero)',
+        'CREATE INDEX IF NOT EXISTS idx_paginas_capitulo   ON paginas (capitulo_id, numero)',
+        'CREATE INDEX IF NOT EXISTS idx_favoritos_usuario  ON favoritos (usuario_id)',
+        'CREATE INDEX IF NOT EXISTS idx_favoritos_obra     ON favoritos (obra_id)',
+        'CREATE INDEX IF NOT EXISTS idx_downloads_usuario  ON downloads (usuario_id)',
+        'CREATE INDEX IF NOT EXISTS idx_downloads_status   ON downloads (status)',
+        'CREATE INDEX IF NOT EXISTS idx_progresso_usuario  ON progresso_leitura (usuario_id)',
+        'CREATE INDEX IF NOT EXISTS idx_progresso_obra     ON progresso_leitura (obra_id)',
+        'CREATE INDEX IF NOT EXISTS idx_historico_usuario  ON historico_leitura (usuario_id, concluido_em DESC)',
+        'CREATE INDEX IF NOT EXISTS idx_historico_obra     ON historico_leitura (obra_id)',
+        'CREATE INDEX IF NOT EXISTS idx_avaliacoes_obra    ON avaliacoes (obra_id)',
+        'CREATE INDEX IF NOT EXISTS idx_comentarios_obra   ON comentarios (obra_id, criado_em DESC)',
+        'CREATE INDEX IF NOT EXISTS idx_comentarios_pai    ON comentarios (parent_id)',
+        'CREATE INDEX IF NOT EXISTS idx_sync_pendente      ON sync_log (usuario_id, sincronizado)',
       ];
 
   // ── helpers genéricos ──────────────────────────────────────

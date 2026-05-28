@@ -7,6 +7,7 @@ import '../repositories/progresso_repository.dart';
 import '../repositories/paginas_repository.dart';
 import '../repositories/capitulos_repository.dart';
 import '../services/auth_service.dart';
+import '../core/database/database_helper.dart';
 import '../models/pagina.dart';
 import '../models/capitulo.dart';
 import '../models/usuario.dart';
@@ -35,6 +36,7 @@ class _LeituraPageState extends State<LeituraPage> with WidgetsBindingObserver {
   bool _disposed = false;
   bool modoClique = false;
   bool _modoOffline = false;
+  bool _capituloDisponivelOffline = false;
 
   PageController? controller;
 
@@ -114,19 +116,49 @@ class _LeituraPageState extends State<LeituraPage> with WidgetsBindingObserver {
     final online = await _online();
     _modoOffline = !online;
 
-    await _carregarPaginas();
+    // Verifica se o capítulo foi realmente baixado (disponivel_offline = 1)
+    // Consulta direta ao SQLite para não depender do modelo Capitulo
+    final rows = await DatabaseHelper.instance.query(
+      'capitulos',
+      where: 'id = ? AND disponivel_offline = 1',
+      whereArgs: [widget.capituloId],
+    );
+    if (_disposed) return;
+    _capituloDisponivelOffline = rows.isNotEmpty;
+
+    await _carregarPaginas(online: online);
     if (_disposed) return;
     await _carregarCapitulos();
     if (_disposed) return;
     await _carregarProgresso();
-    // Comentários só carregam online; offline mostra aviso
     if (online) await _carregarComentarios();
   }
 
-  Future<void> _carregarPaginas() async {
-    final paginas = await _paginasRepo.listarPorCapitulo(widget.capituloId);
-    if (_disposed) return;
-    _safeSetState(() => _paginas = paginas);
+  Future<void> _carregarPaginas({bool online = true}) async {
+    if (!online) {
+      // Offline: só carrega páginas com arquivo físico baixado
+      if (!_capituloDisponivelOffline) {
+        if (_disposed) return;
+        _safeSetState(() => _paginas = []);
+        return;
+      }
+      final paginas = await _paginasRepo.listarPaginasBaixadas(widget.capituloId);
+      if (_disposed) return;
+      _safeSetState(() => _paginas = paginas);
+      return;
+    }
+
+    // Online: busca direto do Supabase sem salvar cache
+    try {
+      final paginas = await _paginasRepo.listarParaLeituraOnline(widget.capituloId);
+      if (_disposed) return;
+      _safeSetState(() => _paginas = paginas);
+    } catch (_) {
+      // Fallback: tenta páginas baixadas se a rede falhar
+      final paginas = await _paginasRepo.listarPaginasBaixadas(widget.capituloId);
+      if (_disposed) return;
+      _safeSetState(() => _paginas = paginas);
+    }
   }
 
   Future<void> _carregarCapitulos() async {
@@ -710,6 +742,11 @@ class _LeituraPageState extends State<LeituraPage> with WidgetsBindingObserver {
     final isDark = Theme.of(context).brightness == Brightness.dark;
     final roxo = isDark ? const Color(0xFF9F67FA) : const Color(0xFF7C3AED);
 
+    // Bloqueio offline: capítulo não baixado
+    if (_modoOffline && !_capituloDisponivelOffline) {
+      return _buildBloqueioOffline(isDark, roxo);
+    }
+
     return Scaffold(
       backgroundColor: isDark ? Colors.black : const Color(0xFFF7F4FB),
       appBar: AppBar(
@@ -816,15 +853,111 @@ class _LeituraPageState extends State<LeituraPage> with WidgetsBindingObserver {
   }
 
   Widget _buildImagem(Pagina pagina) {
-    if (pagina.imagemLocal != null && pagina.imagemLocal!.isNotEmpty) {
-      return Image.file(File(pagina.imagemLocal!),
-          fit: BoxFit.fitWidth,
-          errorBuilder: (_, __, ___) =>
-              const Center(child: Text('Erro ao carregar página')));
-    }
-    return Image.network(pagina.imagemUrl,
+    final localPath = pagina.imagemLocal;
+    // Usa arquivo local apenas se o caminho existe e o arquivo está no disco
+    if (localPath != null && localPath.isNotEmpty) {
+      final file = File(localPath);
+      return Image.file(
+        file,
         fit: BoxFit.fitWidth,
-        errorBuilder: (_, __, ___) =>
-            const Center(child: Text('Erro ao carregar página')));
+        errorBuilder: (_, __, ___) => _erroImagem(),
+      );
+    }
+    // Online: usa URL da rede
+    return Image.network(
+      pagina.imagemUrl,
+      fit: BoxFit.fitWidth,
+      loadingBuilder: (_, child, progress) {
+        if (progress == null) return child;
+        return SizedBox(
+          height: 300,
+          child: Center(
+            child: CircularProgressIndicator(
+              value: progress.expectedTotalBytes != null
+                  ? progress.cumulativeBytesLoaded / progress.expectedTotalBytes!
+                  : null,
+              strokeWidth: 2,
+            ),
+          ),
+        );
+      },
+      errorBuilder: (_, __, ___) => _erroImagem(),
+    );
   }
+
+  Widget _erroImagem() => Container(
+        height: 200,
+        color: Colors.grey.withOpacity(0.1),
+        child: const Center(
+          child: Column(mainAxisSize: MainAxisSize.min, children: [
+            Icon(Icons.broken_image_rounded, size: 40, color: Colors.grey),
+            SizedBox(height: 8),
+            Text('Erro ao carregar página',
+                style: TextStyle(color: Colors.grey, fontSize: 13)),
+          ]),
+        ),
+      );
+
+  Widget _buildBloqueioOffline(bool isDark, Color roxo) => Scaffold(
+        backgroundColor: isDark ? const Color(0xFF0F0A1E) : const Color(0xFFF5F3FF),
+        appBar: AppBar(
+          backgroundColor: isDark ? const Color(0xFF1A1030) : roxo,
+          foregroundColor: Colors.white,
+          elevation: 0,
+          title: Text(widget.capitulo,
+              style: const TextStyle(fontWeight: FontWeight.w700)),
+          centerTitle: true,
+        ),
+        body: Center(
+          child: Padding(
+            padding: const EdgeInsets.all(32),
+            child: Column(mainAxisSize: MainAxisSize.min, children: [
+              Container(
+                padding: const EdgeInsets.all(24),
+                decoration: BoxDecoration(
+                  color: roxo.withOpacity(0.08),
+                  shape: BoxShape.circle,
+                ),
+                child: Icon(Icons.wifi_off_rounded,
+                    size: 56, color: roxo.withOpacity(0.5)),
+              ),
+              const SizedBox(height: 24),
+              Text(
+                'Capítulo não baixado',
+                style: TextStyle(
+                    fontSize: 20,
+                    fontWeight: FontWeight.w800,
+                    color: isDark ? Colors.white : Colors.black87),
+              ),
+              const SizedBox(height: 10),
+              Text(
+                'Você está offline e este capítulo não foi baixado para leitura offline. Conecte-se à internet ou baixe o capítulo antes de sair.',
+                textAlign: TextAlign.center,
+                style: TextStyle(
+                    fontSize: 14,
+                    height: 1.5,
+                    color: isDark ? Colors.white60 : Colors.black54),
+              ),
+              const SizedBox(height: 32),
+              SizedBox(
+                width: double.infinity,
+                child: ElevatedButton.icon(
+                  onPressed: () => Navigator.pop(context),
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: roxo,
+                    foregroundColor: Colors.white,
+                    elevation: 0,
+                    padding: const EdgeInsets.symmetric(vertical: 14),
+                    shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(16)),
+                  ),
+                  icon: const Icon(Icons.arrow_back_rounded),
+                  label: const Text('Voltar',
+                      style: TextStyle(fontWeight: FontWeight.w700, fontSize: 15)),
+                ),
+              ),
+            ]),
+          ),
+        ),
+      );
 }
