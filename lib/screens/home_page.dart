@@ -404,9 +404,13 @@ class _HomePageState extends State<HomePage> {
                     if (_carregandoRecomendacoes || _recomendacoes.isNotEmpty)
                       const SizedBox(height: 18),
                     // Botão discreto para tentar novamente quando falhou
-                    if (_primeiraCarregaFeita && _recomendacoesFalharam && !_carregandoRecomendacoes)
+                    if (_primeiraCarregaFeita &&
+                        _recomendacoesFalharam &&
+                        !_carregandoRecomendacoes)
                       _buildRecomendacaoFalhou(isDark, roxo),
-                    if (_primeiraCarregaFeita && _recomendacoesFalharam && !_carregandoRecomendacoes)
+                    if (_primeiraCarregaFeita &&
+                        _recomendacoesFalharam &&
+                        !_carregandoRecomendacoes)
                       const SizedBox(height: 18),
                     // ── Pesquisa ────────────────────────────
                     _buildPesquisa(isDark, roxo),
@@ -504,7 +508,7 @@ class _HomePageState extends State<HomePage> {
       _carregandoRecomendacoes
           ? _shimmerRecomendacoes(isDark, roxo)
           : SizedBox(
-              height: 200,
+              height: 210,
               child: ListView.separated(
                 scrollDirection: Axis.horizontal,
                 itemCount: _recomendacoes.length,
@@ -556,7 +560,7 @@ class _HomePageState extends State<HomePage> {
         'titulo': obra.titulo,
       }).then((_) => _carregarRecomendacoes()),
       child: Container(
-        width: 130,
+        width: 150,
         decoration: BoxDecoration(
           color: card,
           borderRadius: BorderRadius.circular(16),
@@ -598,15 +602,33 @@ class _HomePageState extends State<HomePage> {
                       color: isDark ? Colors.white : Colors.black87)),
               const SizedBox(height: 5),
               // Score visual
-              Row(children: [
-                Icon(Icons.auto_awesome_rounded, size: 11, color: roxo),
-                const SizedBox(width: 3),
-                Text('$porcentagem% match',
-                    style: TextStyle(
-                        fontSize: 10,
-                        fontWeight: FontWeight.w700,
-                        color: roxo)),
-              ]),
+              Container(
+                padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 3),
+                decoration: BoxDecoration(
+                  color: roxo.withOpacity(0.12),
+                  borderRadius: BorderRadius.circular(999),
+                  border: Border.all(color: roxo.withOpacity(0.25)),
+                ),
+                child: Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Icon(Icons.auto_awesome_rounded, size: 10, color: roxo),
+                    const SizedBox(width: 4),
+                    Flexible(
+                      child: Text(
+                        rec.motivo,
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: TextStyle(
+                          fontSize: 10,
+                          fontWeight: FontWeight.w700,
+                          color: roxo,
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
             ]),
           ),
         ]),
@@ -841,5 +863,4 @@ class _HomePageState extends State<HomePage> {
           ]),
         ),
       );
-
 }
