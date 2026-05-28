@@ -1,10 +1,9 @@
+import 'package:flutter_dotenv/flutter_dotenv.dart';
+
 class AppConfig {
-  static const String supabaseUrl = 
-      "https://pmbwsfnynuiueyctnujc.supabase.co";
-  static const String supabaseKey = 
-      "sb_publishable_NwnIIq81KAOW6kBuTNj2rw_K5BPdbHn";
-  static const String groupId = "SF-GP-01";
-  
-  // Configuração de ambiente
-  static const bool isDevelopment = true; // Alterar para false em produção
+  static String get supabaseUrl => dotenv.env['SUPABASE_URL'] ?? '';
+  static String get supabaseKey => dotenv.env['SUPABASE_KEY'] ?? '';
+  static String get groupId => dotenv.env['GROUP_ID'] ?? 'SF-GP-01';
+  static String get huggingFaceApiKey => dotenv.env['HF_API_KEY'] ?? '';
+  static const bool isDevelopment = true;
 }

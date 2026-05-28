@@ -115,6 +115,13 @@ class _HomePageState extends State<HomePage> {
     _filtrar(pesquisaController.text);
   }
 
+  /// Chamado sempre que um favorito é adicionado ou removido em qualquer card.
+  /// Atualiza a lista de favoritos e recalcula as recomendações em sequência.
+  Future<void> _aoFavoritoAlterado() async {
+    await _carregarFavoritos();
+    if (_usuarioId != null) await _carregarRecomendacoes();
+  }
+
   Future<void> _carregarRecomendacoes() async {
     if (_usuarioId == null) return;
     setState(() {
@@ -137,9 +144,6 @@ class _HomePageState extends State<HomePage> {
   }
 
   void _filtrar(String texto) {
-    // IDs das obras já recomendadas (para não repetir na lista principal)
-    final idsRecomendados = _recomendacoes.map((r) => r.obra.id).toSet();
-
     List<Obra> lista = _obras.where((o) {
       final t = o.titulo.toLowerCase(),
           d = (o.descricao ?? '').toLowerCase(),
@@ -149,12 +153,6 @@ class _HomePageState extends State<HomePage> {
 
     if (mostrarFavoritos) {
       lista = lista.where((o) => _titulosFavoritos.contains(o.titulo)).toList();
-    } else {
-      // Na listagem geral, esconde obras que já aparecem nas recomendações
-      // (evita duplicatas visuais na mesma tela)
-      if (texto.isEmpty) {
-        lista = lista.where((o) => !idsRecomendados.contains(o.id)).toList();
-      }
     }
 
     setState(() => _obrasFiltradas = lista);
@@ -443,7 +441,7 @@ class _HomePageState extends State<HomePage> {
                                 const SizedBox(height: 10),
                             itemBuilder: (_, i) => ObraCard(
                                 obra: _obrasFiltradas[i],
-                                onFavoritoAlterado: _carregarFavoritos),
+                                onFavoritoAlterado: _aoFavoritoAlterado),
                           ),
                     const SizedBox(height: 14),
                   ],
