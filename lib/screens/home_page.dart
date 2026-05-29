@@ -482,17 +482,6 @@ class _HomePageState extends State<HomePage> {
                 fontSize: 16,
                 fontWeight: FontWeight.w800,
                 color: isDark ? Colors.white : Colors.black87)),
-        const SizedBox(width: 8),
-        Container(
-          padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 3),
-          decoration: BoxDecoration(
-            color: roxo.withOpacity(0.12),
-            borderRadius: BorderRadius.circular(999),
-          ),
-          child: Text('IA',
-              style: TextStyle(
-                  fontSize: 10, fontWeight: FontWeight.w800, color: roxo)),
-        ),
         const Spacer(),
         // Botão recarregar
         if (!_carregandoRecomendacoes)
@@ -711,8 +700,22 @@ class _HomePageState extends State<HomePage> {
                               const SizedBox(height: 10),
                               ElevatedButton(
                                 onPressed: () {
-                                  pesquisaController.text = b['titulo']!;
-                                  _filtrar(b['titulo']!);
+                                  final obra = _obras.firstWhere(
+                                    (o) => o.titulo == b['titulo'],
+                                    orElse: () => _obras.firstWhere(
+                                      (o) => o.titulo.toLowerCase().contains(
+                                            b['titulo']!.toLowerCase()),
+                                      orElse: () => _obras.first,
+                                    ),
+                                  );
+                                  Navigator.pushNamed(
+                                    context,
+                                    '/detalhe',
+                                    arguments: {
+                                      'obraId': obra.id,
+                                      'titulo': obra.titulo,
+                                    },
+                                  );
                                 },
                                 style: ElevatedButton.styleFrom(
                                     backgroundColor: Colors.white,

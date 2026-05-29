@@ -4,6 +4,7 @@ import 'package:connectivity_plus/connectivity_plus.dart';
 import 'package:dio/dio.dart';
 import 'package:flutter/foundation.dart';
 import '../models/obra.dart';
+import '../models/genero.dart';
 import '../repositories/favoritos_repository.dart';
 import '../repositories/obras_repository.dart';
 import '../repositories/generos_repository.dart';
@@ -11,18 +12,26 @@ import '../core/helpers/app.config.dart';
 
 /// Recomendação com IA real (Hugging Face Inference API) + fallback local.
 ///
-/// MODELO: sentence-transformers/all-MiniLM-L6-v2
-///   - Transforma textos em vetores de 384 dimensões (embeddings)
-///   - Similaridade de cosseno mede o quão parecidos dois textos são
+/// MODELO: paraphrase-multilingual-MiniLM-L12-v2
 ///
-/// FLUXO:
-///   1. Monta texto de perfil do usuário (favoritos + gêneros)
-///   2. Monta texto de cada obra candidata (título + gêneros da obra_generos)
-///   3. Envia tudo ao HF em uma única chamada (feature-extraction)
-///   4. Calcula similaridade de cosseno: perfil × cada candidata
-///   5. Ordena por score e retorna topN (mínimo 0.40)
-///   6. OFFLINE ou FALHA → fallback ao algoritmo local por gênero
-///   7. COLD START (sem favoritos) → retorna destaques
+/// CORREÇÕES v2:
+///   1. Genre overlap agora é MULTIPLICADOR, não bônus aditivo.
+///      - Obras sem nenhum gênero em comum com o perfil → score × 0.30
+///      - Obras com overlap parcial → score × (0.55 + overlap × 0.55)
+///      - Obras com overlap total   → score × até 1.10
+///      Isso impede que "Ação" apareça para usuário de "Romance".
+///
+///   2. Bônus de destaque reduzido de 0.03 para 0.008 — não deve
+///      compensar falta de afinidade de gênero.
+///
+///   3. Threshold ajustado para 0.30 — o multiplicador já filtra obras
+///      ruins; obras compatíveis continuam passando com score menor.
+///
+///   4. _calcularOverlapGeneros usa obra_generos (async, narrativos
+///      apenas) dentro do loop de scoring — mesmos dados já buscados
+///      para montar o texto de embedding, sem chamadas extras.
+///
+///   5. Fallback local igualmente usa o multiplicador de overlap.
 class RecomendacaoService {
   RecomendacaoService._();
   static final RecomendacaoService instance = RecomendacaoService._();
@@ -36,18 +45,46 @@ class RecomendacaoService {
     receiveTimeout: const Duration(seconds: 30),
   ));
 
-  // Hugging Face Inference API — sentence-transformers
   static const _hfUrl =
       'https://router.huggingface.co/hf-inference/models/'
-      'sentence-transformers/all-MiniLM-L6-v2/pipeline/feature-extraction';
+      'sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2/pipeline/feature-extraction';
 
-  // Score mínimo para aparecer nas recomendações
-  static const _scoreMinimo = 0.40;
+  // Threshold baixo — o multiplicador de gênero já penaliza obras sem overlap.
+  static const _scoreMinimo = 0.30;
 
-  // Gêneros de tipo/formato que não são úteis como motivo
+  // Gêneros que não carregam sinal semântico útil para embeddings.
   static const _generosIgnorados = {
-    'mangá', 'manhwa', 'manhua', 'livro', 'webtoon'
+    'mangá', 'manhwa', 'manhua', 'livro', 'webtoon',
+    'shonen', 'shounen', 'seinen', 'josei', 'shoujo', 'kodomomuke',
   };
+
+  // Mesmo conjunto — não usar como motivo de recomendação.
+  static const _generosIgnoradosMotivo = {
+    'mangá', 'manhwa', 'manhua', 'livro', 'webtoon',
+    'shonen', 'shounen', 'seinen', 'josei', 'shoujo', 'kodomomuke',
+  };
+
+  static const _traducao = {
+    'ação': 'action',
+    'aventura': 'adventure',
+    'fantasia': 'fantasy',
+    'romance': 'romance',
+    'terror': 'horror',
+    'comédia': 'comedy',
+    'ficção científica': 'sci-fi',
+    'drama': 'drama',
+    'mistério': 'mystery',
+    'sobrenatural': 'supernatural',
+    'psicológico': 'psychological',
+    'suspense': 'thriller',
+    'esporte': 'sports',
+    'histórico': 'historical',
+    'slice of life': 'slice of life',
+    'escolar': 'school life',
+  };
+
+  String _traduzir(String genero) =>
+      _traducao[genero.toLowerCase()] ?? genero.toLowerCase();
 
   // ── Ponto de entrada ──────────────────────────────────────
 
@@ -59,23 +96,18 @@ class RecomendacaoService {
       final favoritos  = await _favoritosRepo.listarFavoritos(usuarioId);
       final todasObras = await _obrasRepo.listarTodas();
 
-      // COLD START: sem favoritos → destaques
       if (favoritos.isEmpty) {
         return _fallbackDestaques(todasObras, topN: topN);
       }
 
-      // Obras que o usuário ainda não interagiu
       final idsInteragidos = favoritos.map((o) => o.id).toSet();
-      final candidatas = todasObras
-          .where((o) => !idsInteragidos.contains(o.id))
-          .toList();
+      final candidatas =
+          todasObras.where((o) => !idsInteragidos.contains(o.id)).toList();
 
       if (candidatas.isEmpty) return [];
 
-      // Perfil de gêneros (usado tanto pela IA quanto pelo fallback)
       final perfilGeneros = await _buildPerfilGeneros(favoritos);
 
-      // Tenta HF Inference API se online e chave configurada
       if (await _online() && AppConfig.huggingFaceApiKey.isNotEmpty) {
         try {
           final resultado = await _recomendarComEmbeddings(
@@ -90,7 +122,6 @@ class RecomendacaoService {
         }
       }
 
-      // Fallback local por score de gênero
       return await _recomendarLocal(
         candidatas:    candidatas,
         favoritos:     favoritos,
@@ -106,38 +137,71 @@ class RecomendacaoService {
   // ── Hugging Face Embeddings ───────────────────────────────
 
   Future<List<ObraRecomendada>> _recomendarComEmbeddings({
-    required List<Obra> favoritos,
-    required List<Obra> candidatas,
-    required Map<String, double> perfilGeneros,
-    required int topN,
+    required List<Obra>           favoritos,
+    required List<Obra>           candidatas,
+    required Map<String, double>  perfilGeneros,
+    required int                  topN,
   }) async {
-    // ── 1. Monta texto do perfil do usuário ──────────────────
-    final titulosFav = favoritos.map((o) => o.titulo).join(', ');
-    final topGeneros = (perfilGeneros.entries.toList()
-          ..sort((a, b) => b.value.compareTo(a.value)))
-        .take(6)
-        .map((e) => e.key)
-        .join(', ');
+    // ── Texto de perfil enriquecido ────────────────────────
+    final bufferPerfil = StringBuffer();
+    for (final fav in favoritos) {
+      final generos = await _generosRepo.listarPorObra(fav.id);
+      final generosNarrativos = generos
+          .where((g) =>
+              g.categoria == 'narrativo' &&
+              !_generosIgnorados.contains(g.nome.toLowerCase()))
+          .map((g) => _traduzir(g.nome))
+          .join(', ');
 
-    final textoPerfil =
-        'Manga favoritos: $titulosFav. Generos preferidos: $topGeneros';
+      bufferPerfil.write('${fav.titulo}');
+      if (fav.descricao != null && fav.descricao!.isNotEmpty) {
+        bufferPerfil.write(': ${fav.descricao}');
+      }
+      if (generosNarrativos.isNotEmpty) {
+        bufferPerfil.write(' [$generosNarrativos]');
+      }
+      bufferPerfil.write('. ');
+    }
 
-    // ── 2. Monta texto de cada candidata usando obra_generos ─
-    final candidatasLimitadas = candidatas.take(30).toList();
-    final textosCandidatas = await Future.wait(
-      candidatasLimitadas.map((o) async {
-        final generos = await _generosRepo.listarPorObra(o.id);
-        final nomesGeneros = generos.map((g) => g.nome).join(', ');
-        return 'Titulo: ${o.titulo}. Generos: $nomesGeneros';
-      }),
-    );
+    final textoPerfil = 'Manga I enjoy: ${bufferPerfil.toString().trim()}';
+    debugPrint('PERFIL TEXT: $textoPerfil');
 
-    // ── 3. Chama a API em lote ────────────────────────────────
+    // ── Texto e gêneros de cada candidata ─────────────────
+    // Carrega e armazena gêneros para usar no scoring (evita dupla busca).
+    final candidatasLimitadas  = candidatas.take(30).toList();
+    final generosCandidatas    = <String, List<Genero>>{};
+    final textosCandidatas     = <String>[];
+
+    for (final o in candidatasLimitadas) {
+      final generos = await _generosRepo.listarPorObra(o.id);
+      generosCandidatas[o.id] = generos;
+
+      final generosNarrativos = generos
+          .where((g) =>
+              g.categoria == 'narrativo' &&
+              !_generosIgnorados.contains(g.nome.toLowerCase()))
+          .map((g) => _traduzir(g.nome))
+          .join(', ');
+
+      final buf = StringBuffer('${o.titulo}');
+      if (o.descricao != null && o.descricao!.isNotEmpty) {
+        buf.write(': ${o.descricao}');
+      }
+      if (generosNarrativos.isNotEmpty) {
+        buf.write(' [$generosNarrativos]');
+      }
+      textosCandidatas.add(buf.toString());
+    }
+
+    // ── Chamada à API ──────────────────────────────────────
     final inputs = [textoPerfil, ...textosCandidatas];
 
     final response = await _dio.post(
       _hfUrl,
-      data: jsonEncode({'inputs': inputs, 'options': {'wait_for_model': true}}),
+      data: jsonEncode({
+        'inputs': inputs,
+        'options': {'wait_for_model': true},
+      }),
       options: Options(headers: {
         'Authorization': 'Bearer ${AppConfig.huggingFaceApiKey}',
         'Content-Type': 'application/json',
@@ -148,28 +212,42 @@ class RecomendacaoService {
     if (rawEmbeddings.length != inputs.length) return [];
 
     final List<List<double>> embeddings = rawEmbeddings
-        .map((e) => (e as List<dynamic>).map((v) => (v as num).toDouble()).toList())
+        .map((e) =>
+            (e as List<dynamic>).map((v) => (v as num).toDouble()).toList())
         .toList();
 
     final embPerfil     = embeddings[0];
     final embCandidatas = embeddings.sublist(1);
 
-    // ── 4. Calcula similaridade de cosseno ────────────────────
+    // ── Scoring com multiplicador de overlap ───────────────
     final scored = <ObraRecomendada>[];
 
     for (int i = 0; i < candidatasLimitadas.length; i++) {
-      final obra       = candidatasLimitadas[i];
-      final similarity = _cosineSimilarity(embPerfil, embCandidatas[i]);
-      final scoreComBonus = similarity + (obra.destaque ? 0.03 : 0.0);
+      final obra    = candidatasLimitadas[i];
+      final generos = generosCandidatas[obra.id] ?? [];
 
-      // Filtra obras com score abaixo do mínimo
-      if (scoreComBonus < _scoreMinimo) continue;
+      final similarity    = _cosineSimilarity(embPerfil, embCandidatas[i]);
+      final overlapFactor = _calcularOverlapFactor(generos, perfilGeneros);
+
+      // Multiplicador de gênero é o filtro principal:
+      //   - overlap 0.0 → ×0.30  (obras sem gênero em comum são fortemente penalizadas)
+      //   - overlap 0.5 → ×0.825 (overlap parcial)
+      //   - overlap 1.0 → ×1.10  (overlap total ganha leve bônus)
+      // Isso significa que Ação nunca vai superar Romance para um usuário de Romance.
+      final scoreFinal =
+          similarity * overlapFactor + (obra.destaque ? 0.008 : 0.0);
+
+      debugPrint(
+          '  SCORE ${obra.titulo}: ${(scoreFinal * 100).toStringAsFixed(1)}%'
+          ' (cos=${(similarity * 100).toStringAsFixed(1)}%'
+          ' overlap_factor=${overlapFactor.toStringAsFixed(2)})');
+
+      if (scoreFinal < _scoreMinimo) continue;
 
       final motivo = await _motivoPorGenero(obra, favoritos);
-
       scored.add(ObraRecomendada(
         obra:   obra,
-        score:  scoreComBonus.clamp(0.0, 1.0),
+        score:  scoreFinal.clamp(0.0, 1.0),
         motivo: motivo,
       ));
     }
@@ -183,22 +261,88 @@ class RecomendacaoService {
           '  ${r.obra.titulo}: ${(r.score * 100).toStringAsFixed(1)}% — ${r.motivo}');
     }
 
+    // Se nada passou o threshold, retorna o top-N sem filtro para não
+    // deixar a seção vazia. Caso real: catálogo muito pequeno.
+    if (resultado.isEmpty) {
+      scored.clear();
+      for (int i = 0; i < candidatasLimitadas.length; i++) {
+        final obra    = candidatasLimitadas[i];
+        final generos = generosCandidatas[obra.id] ?? [];
+        final similarity    = _cosineSimilarity(embPerfil, embCandidatas[i]);
+        final overlapFactor = _calcularOverlapFactor(generos, perfilGeneros);
+        final scoreF = similarity * overlapFactor + (obra.destaque ? 0.008 : 0.0);
+        final motivo = await _motivoPorGenero(obra, favoritos);
+        scored.add(ObraRecomendada(
+          obra: obra, score: scoreF.clamp(0.0, 1.0), motivo: motivo));
+      }
+      scored.sort((a, b) => b.score.compareTo(a.score));
+      debugPrint('HF: nenhuma obra passou threshold, top-$topN sem filtro');
+      return scored.take(topN).toList();
+    }
+
     return resultado;
+  }
+
+  // ── Multiplicador de overlap de gêneros (0.30 – 1.10) ────
+  //
+  // Recebe a lista de gêneros da candidata e o perfil de frequência
+  // do usuário. Retorna um fator que é usado para multiplicar o score
+  // de embedding, garantindo que afinidade de gênero domine a seleção.
+  //
+  // Exemplos para perfil {romance: 8, drama: 4, comédia: 4}:
+  //   Kaguya (romance, comédia, drama) → overlap alto → fator ~1.10
+  //   Naruto (ação, aventura, fantasia) → overlap 0   → fator 0.30
+  //   Obra com romance + ação           → overlap médio → fator ~0.75
+  double _calcularOverlapFactor(
+    List<Genero> generosCandidata,
+    Map<String, double> perfilGeneros,
+  ) {
+    if (perfilGeneros.isEmpty) return 1.0; // sem dados → não penaliza
+
+    final nomesNarrativos = generosCandidata
+        .where((g) =>
+            g.categoria == 'narrativo' &&
+            !_generosIgnorados.contains(g.nome.toLowerCase()))
+        .map((g) => g.nome.toLowerCase())
+        .toSet();
+
+    if (nomesNarrativos.isEmpty) {
+      // Candidata sem gêneros narrativos mapeados → penalidade moderada
+      return 0.50;
+    }
+
+    // Soma dos pesos de perfil que coincidem com a candidata
+    double scoreOverlap  = 0.0;
+    double totalPerfil   = 0.0;
+
+    for (final entry in perfilGeneros.entries) {
+      totalPerfil += entry.value;
+      if (nomesNarrativos.contains(entry.key)) {
+        scoreOverlap += entry.value;
+      }
+    }
+
+    if (totalPerfil == 0) return 1.0;
+
+    // overlapRatio: 0.0 = nenhum gênero em comum; 1.0 = todos em comum
+    final overlapRatio = (scoreOverlap / totalPerfil).clamp(0.0, 1.0);
+
+    // Mapeamento contínuo:
+    //   overlapRatio = 0.0 → fator = 0.30 (fortíssima penalidade)
+    //   overlapRatio = 0.5 → fator ≈ 0.70
+    //   overlapRatio = 1.0 → fator = 1.10 (leve bônus)
+    return (0.30 + overlapRatio * 0.80).clamp(0.30, 1.10);
   }
 
   // ── Similaridade de Cosseno ───────────────────────────────
 
   double _cosineSimilarity(List<double> a, List<double> b) {
-    double dot   = 0.0;
-    double normA = 0.0;
-    double normB = 0.0;
-
+    double dot = 0.0, normA = 0.0, normB = 0.0;
     for (int i = 0; i < a.length; i++) {
       dot   += a[i] * b[i];
       normA += a[i] * a[i];
       normB += b[i] * b[i];
     }
-
     final denom = sqrt(normA) * sqrt(normB);
     return denom == 0 ? 0.0 : dot / denom;
   }
@@ -206,51 +350,56 @@ class RecomendacaoService {
   // ── Fallback local (offline / falha de rede) ──────────────
 
   Future<List<ObraRecomendada>> _recomendarLocal({
-    required List<Obra> candidatas,
-    required List<Obra> favoritos,
+    required List<Obra>          candidatas,
+    required List<Obra>          favoritos,
     required Map<String, double> perfilGeneros,
-    required int topN,
+    required int                 topN,
   }) async {
     final statusFavoritos = favoritos.map((o) => o.status).toSet();
     final scored = <ObraRecomendada>[];
 
     for (final obra in candidatas) {
-      double score = 0.0;
-
-      // Usa obra_generos para calcular score
       final generos = await _generosRepo.listarPorObra(obra.id);
+
+      // Score bruto por frequência de gênero narrativo no perfil
+      double scoreBase = 0.0;
       for (final g in generos) {
-        score += perfilGeneros[g.nome.toLowerCase()] ?? 0;
+        if (g.categoria == 'narrativo' &&
+            !_generosIgnorados.contains(g.nome.toLowerCase())) {
+          scoreBase += perfilGeneros[g.nome.toLowerCase()] ?? 0;
+        }
       }
 
-      // Fallback para o campo genero simples
-      if (score == 0 && obra.genero != null && obra.genero!.isNotEmpty) {
-        score += perfilGeneros[obra.genero!.toLowerCase()] ?? 0;
+      // Fallback para campo simples se não há narrativos mapeados
+      if (scoreBase == 0 && obra.genero != null && obra.genero!.isNotEmpty) {
+        scoreBase += perfilGeneros[obra.genero!.toLowerCase()] ?? 0;
       }
 
-      if (statusFavoritos.contains(obra.status)) score += 0.5;
-      if (obra.destaque) score += 1.0;
+      if (statusFavoritos.contains(obra.status)) scoreBase += 0.5;
+      if (obra.destaque) scoreBase += 0.5; // bônus menor que no original
 
-      if (score > 0) {
+      // Aplica o mesmo multiplicador de overlap para consistência
+      final overlapFactor = _calcularOverlapFactor(generos, perfilGeneros);
+      final scoreFinal    = scoreBase * overlapFactor;
+
+      if (scoreFinal > 0) {
         final motivo = await _motivoPorGenero(obra, favoritos);
         scored.add(ObraRecomendada(
-          obra:   obra,
-          score:  score,
-          motivo: motivo,
-        ));
+            obra: obra, score: scoreFinal, motivo: motivo));
       }
     }
 
     if (scored.isEmpty) return _fallbackDestaques(candidatas, topN: topN);
 
-    final max = scored.map((r) => r.score).reduce((a, b) => a > b ? a : b);
+    final maxScore =
+        scored.map((r) => r.score).reduce((a, b) => a > b ? a : b);
     scored.sort((a, b) => b.score.compareTo(a.score));
 
     return scored
         .take(topN)
         .map((r) => ObraRecomendada(
               obra:   r.obra,
-              score:  max > 0 ? (r.score / max).clamp(0.0, 1.0) : 0.0,
+              score:  maxScore > 0 ? (r.score / maxScore).clamp(0.0, 1.0) : 0.0,
               motivo: r.motivo,
             ))
         .toList();
@@ -275,46 +424,36 @@ class RecomendacaoService {
 
   // ── Helpers ───────────────────────────────────────────────
 
-  /// Gera motivo legível usando os gêneros da tabela obra_generos.
-  /// Prioriza gêneros narrativos em comum (Ação, Aventura, etc.)
-  /// em vez de comparar só o campo genero da obra.
   Future<String> _motivoPorGenero(Obra obra, List<Obra> favoritos) async {
     final generosObra = await _generosRepo.listarPorObra(obra.id);
     final nomesGenerosObra = generosObra
         .map((g) => g.nome.toLowerCase())
-        .where((n) => !_generosIgnorados.contains(n))
+        .where((n) => !_generosIgnoradosMotivo.contains(n))
         .toSet();
 
     if (nomesGenerosObra.isEmpty) return 'Pode te interessar';
 
-    // Verifica interseção com gêneros de cada favorito
     for (final fav in favoritos) {
       final generosFav = await _generosRepo.listarPorObra(fav.id);
       final nomesGenerosFav = generosFav
           .map((g) => g.nome.toLowerCase())
-          .where((n) => !_generosIgnorados.contains(n))
+          .where((n) => !_generosIgnoradosMotivo.contains(n))
           .toSet();
 
       final emComum = nomesGenerosObra.intersection(nomesGenerosFav).toList();
-
       if (emComum.isNotEmpty) {
-        // Prefere gêneros narrativos (Ação, Aventura) sobre demográficos (Shonen)
         final narrativos = generosFav
             .where((g) =>
                 g.categoria == 'narrativo' &&
                 emComum.contains(g.nome.toLowerCase()))
             .map((g) => g.nome)
             .toList();
-
-        final generoExibido = narrativos.isNotEmpty
-            ? narrativos.first
-            : emComum.first[0].toUpperCase() + emComum.first.substring(1);
-
-        return generoExibido;
+        if (narrativos.isNotEmpty) return narrativos.first;
+        final genero = emComum.first;
+        return genero[0].toUpperCase() + genero.substring(1);
       }
     }
 
-    // Fallback: primeiro gênero narrativo da própria obra
     final narrativo = generosObra
         .where((g) => g.categoria == 'narrativo')
         .map((g) => g.nome)
@@ -326,18 +465,12 @@ class RecomendacaoService {
   Future<Map<String, double>> _buildPerfilGeneros(List<Obra> favoritos) async {
     final Map<String, double> perfil = {};
     for (final fav in favoritos) {
-      // Usa obra_generos para perfil mais rico
       final gs = await _generosRepo.listarPorObra(fav.id);
       for (final g in gs) {
+        if (g.categoria != 'narrativo') continue;
         final nome = g.nome.toLowerCase();
-        // Gêneros narrativos têm peso maior
-        final peso = g.categoria == 'narrativo' ? 4.0 : 2.0;
-        perfil[nome] = (perfil[nome] ?? 0) + peso;
-      }
-      // Complementa com o campo genero simples
-      if (fav.genero != null && fav.genero!.isNotEmpty) {
-        final nome = fav.genero!.toLowerCase();
-        perfil[nome] = (perfil[nome] ?? 0) + 2.0;
+        if (_generosIgnorados.contains(nome)) continue;
+        perfil[nome] = (perfil[nome] ?? 0) + 4.0;
       }
     }
     return perfil;
@@ -354,7 +487,7 @@ class RecomendacaoService {
 class ObraRecomendada {
   final Obra obra;
 
-  /// Score de similaridade de cosseno (0.0 – 1.0).
+  /// Score final (embedding × overlap_factor + destaque_bonus).
   final double score;
 
   /// Texto curto exibido no card de recomendação.
