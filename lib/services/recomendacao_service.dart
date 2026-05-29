@@ -14,54 +14,52 @@ import '../core/helpers/app.config.dart';
 ///
 /// MODELO: paraphrase-multilingual-MiniLM-L12-v2
 ///
-/// CORREÇÕES v2:
-///   1. Genre overlap agora é MULTIPLICADOR, não bônus aditivo.
-///      - Obras sem nenhum gênero em comum com o perfil → score × 0.30
-///      - Obras com overlap parcial → score × (0.55 + overlap × 0.55)
-///      - Obras com overlap total   → score × até 1.10
-///      Isso impede que "Ação" apareça para usuário de "Romance".
-///
-///   2. Bônus de destaque reduzido de 0.03 para 0.008 — não deve
-///      compensar falta de afinidade de gênero.
-///
-///   3. Threshold ajustado para 0.30 — o multiplicador já filtra obras
-///      ruins; obras compatíveis continuam passando com score menor.
-///
-///   4. _calcularOverlapGeneros usa obra_generos (async, narrativos
-///      apenas) dentro do loop de scoring — mesmos dados já buscados
-///      para montar o texto de embedding, sem chamadas extras.
-///
-///   5. Fallback local igualmente usa o multiplicador de overlap.
 class RecomendacaoService {
   RecomendacaoService._();
   static final RecomendacaoService instance = RecomendacaoService._();
 
   final _favoritosRepo = FavoritosRepository.instance;
-  final _obrasRepo     = ObrasRepository.instance;
-  final _generosRepo   = GenerosRepository.instance;
+  final _obrasRepo = ObrasRepository.instance;
+  final _generosRepo = GenerosRepository.instance;
 
   final _dio = Dio(BaseOptions(
     connectTimeout: const Duration(seconds: 15),
     receiveTimeout: const Duration(seconds: 30),
   ));
 
-  static const _hfUrl =
-      'https://router.huggingface.co/hf-inference/models/'
+  static const _hfUrl = 'https://router.huggingface.co/hf-inference/models/'
       'sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2/pipeline/feature-extraction';
 
-  // Threshold baixo — o multiplicador de gênero já penaliza obras sem overlap.
   static const _scoreMinimo = 0.30;
 
   // Gêneros que não carregam sinal semântico útil para embeddings.
   static const _generosIgnorados = {
-    'mangá', 'manhwa', 'manhua', 'livro', 'webtoon',
-    'shonen', 'shounen', 'seinen', 'josei', 'shoujo', 'kodomomuke',
+    'mangá',
+    'manhwa',
+    'manhua',
+    'livro',
+    'webtoon',
+    'shonen',
+    'shounen',
+    'seinen',
+    'josei',
+    'shoujo',
+    'kodomomuke',
   };
 
   // Mesmo conjunto — não usar como motivo de recomendação.
   static const _generosIgnoradosMotivo = {
-    'mangá', 'manhwa', 'manhua', 'livro', 'webtoon',
-    'shonen', 'shounen', 'seinen', 'josei', 'shoujo', 'kodomomuke',
+    'mangá',
+    'manhwa',
+    'manhua',
+    'livro',
+    'webtoon',
+    'shonen',
+    'shounen',
+    'seinen',
+    'josei',
+    'shoujo',
+    'kodomomuke',
   };
 
   static const _traducao = {
@@ -93,7 +91,7 @@ class RecomendacaoService {
     int topN = 5,
   }) async {
     try {
-      final favoritos  = await _favoritosRepo.listarFavoritos(usuarioId);
+      final favoritos = await _favoritosRepo.listarFavoritos(usuarioId);
       final todasObras = await _obrasRepo.listarTodas();
 
       if (favoritos.isEmpty) {
@@ -111,10 +109,10 @@ class RecomendacaoService {
       if (await _online() && AppConfig.huggingFaceApiKey.isNotEmpty) {
         try {
           final resultado = await _recomendarComEmbeddings(
-            favoritos:     favoritos,
-            candidatas:    candidatas,
+            favoritos: favoritos,
+            candidatas: candidatas,
             perfilGeneros: perfilGeneros,
-            topN:          topN,
+            topN: topN,
           );
           if (resultado.isNotEmpty) return resultado;
         } catch (e) {
@@ -123,10 +121,10 @@ class RecomendacaoService {
       }
 
       return await _recomendarLocal(
-        candidatas:    candidatas,
-        favoritos:     favoritos,
+        candidatas: candidatas,
+        favoritos: favoritos,
         perfilGeneros: perfilGeneros,
-        topN:          topN,
+        topN: topN,
       );
     } catch (e, st) {
       debugPrint('RECOMENDACAO ERRO: $e\n$st');
@@ -137,10 +135,10 @@ class RecomendacaoService {
   // ── Hugging Face Embeddings ───────────────────────────────
 
   Future<List<ObraRecomendada>> _recomendarComEmbeddings({
-    required List<Obra>           favoritos,
-    required List<Obra>           candidatas,
-    required Map<String, double>  perfilGeneros,
-    required int                  topN,
+    required List<Obra> favoritos,
+    required List<Obra> candidatas,
+    required Map<String, double> perfilGeneros,
+    required int topN,
   }) async {
     // ── Texto de perfil enriquecido ────────────────────────
     final bufferPerfil = StringBuffer();
@@ -168,9 +166,9 @@ class RecomendacaoService {
 
     // ── Texto e gêneros de cada candidata ─────────────────
     // Carrega e armazena gêneros para usar no scoring (evita dupla busca).
-    final candidatasLimitadas  = candidatas.take(30).toList();
-    final generosCandidatas    = <String, List<Genero>>{};
-    final textosCandidatas     = <String>[];
+    final candidatasLimitadas = candidatas.take(30).toList();
+    final generosCandidatas = <String, List<Genero>>{};
+    final textosCandidatas = <String>[];
 
     for (final o in candidatasLimitadas) {
       final generos = await _generosRepo.listarPorObra(o.id);
@@ -216,17 +214,17 @@ class RecomendacaoService {
             (e as List<dynamic>).map((v) => (v as num).toDouble()).toList())
         .toList();
 
-    final embPerfil     = embeddings[0];
+    final embPerfil = embeddings[0];
     final embCandidatas = embeddings.sublist(1);
 
     // ── Scoring com multiplicador de overlap ───────────────
     final scored = <ObraRecomendada>[];
 
     for (int i = 0; i < candidatasLimitadas.length; i++) {
-      final obra    = candidatasLimitadas[i];
+      final obra = candidatasLimitadas[i];
       final generos = generosCandidatas[obra.id] ?? [];
 
-      final similarity    = _cosineSimilarity(embPerfil, embCandidatas[i]);
+      final similarity = _cosineSimilarity(embPerfil, embCandidatas[i]);
       final overlapFactor = _calcularOverlapFactor(generos, perfilGeneros);
 
       // Multiplicador de gênero é o filtro principal:
@@ -246,8 +244,8 @@ class RecomendacaoService {
 
       final motivo = await _motivoPorGenero(obra, favoritos);
       scored.add(ObraRecomendada(
-        obra:   obra,
-        score:  scoreFinal.clamp(0.0, 1.0),
+        obra: obra,
+        score: scoreFinal.clamp(0.0, 1.0),
         motivo: motivo,
       ));
     }
@@ -266,14 +264,15 @@ class RecomendacaoService {
     if (resultado.isEmpty) {
       scored.clear();
       for (int i = 0; i < candidatasLimitadas.length; i++) {
-        final obra    = candidatasLimitadas[i];
+        final obra = candidatasLimitadas[i];
         final generos = generosCandidatas[obra.id] ?? [];
-        final similarity    = _cosineSimilarity(embPerfil, embCandidatas[i]);
+        final similarity = _cosineSimilarity(embPerfil, embCandidatas[i]);
         final overlapFactor = _calcularOverlapFactor(generos, perfilGeneros);
-        final scoreF = similarity * overlapFactor + (obra.destaque ? 0.008 : 0.0);
+        final scoreF =
+            similarity * overlapFactor + (obra.destaque ? 0.008 : 0.0);
         final motivo = await _motivoPorGenero(obra, favoritos);
         scored.add(ObraRecomendada(
-          obra: obra, score: scoreF.clamp(0.0, 1.0), motivo: motivo));
+            obra: obra, score: scoreF.clamp(0.0, 1.0), motivo: motivo));
       }
       scored.sort((a, b) => b.score.compareTo(a.score));
       debugPrint('HF: nenhuma obra passou threshold, top-$topN sem filtro');
@@ -312,8 +311,8 @@ class RecomendacaoService {
     }
 
     // Soma dos pesos de perfil que coincidem com a candidata
-    double scoreOverlap  = 0.0;
-    double totalPerfil   = 0.0;
+    double scoreOverlap = 0.0;
+    double totalPerfil = 0.0;
 
     for (final entry in perfilGeneros.entries) {
       totalPerfil += entry.value;
@@ -339,7 +338,7 @@ class RecomendacaoService {
   double _cosineSimilarity(List<double> a, List<double> b) {
     double dot = 0.0, normA = 0.0, normB = 0.0;
     for (int i = 0; i < a.length; i++) {
-      dot   += a[i] * b[i];
+      dot += a[i] * b[i];
       normA += a[i] * a[i];
       normB += b[i] * b[i];
     }
@@ -350,10 +349,10 @@ class RecomendacaoService {
   // ── Fallback local (offline / falha de rede) ──────────────
 
   Future<List<ObraRecomendada>> _recomendarLocal({
-    required List<Obra>          candidatas,
-    required List<Obra>          favoritos,
+    required List<Obra> candidatas,
+    required List<Obra> favoritos,
     required Map<String, double> perfilGeneros,
-    required int                 topN,
+    required int topN,
   }) async {
     final statusFavoritos = favoritos.map((o) => o.status).toSet();
     final scored = <ObraRecomendada>[];
@@ -380,26 +379,25 @@ class RecomendacaoService {
 
       // Aplica o mesmo multiplicador de overlap para consistência
       final overlapFactor = _calcularOverlapFactor(generos, perfilGeneros);
-      final scoreFinal    = scoreBase * overlapFactor;
+      final scoreFinal = scoreBase * overlapFactor;
 
       if (scoreFinal > 0) {
         final motivo = await _motivoPorGenero(obra, favoritos);
-        scored.add(ObraRecomendada(
-            obra: obra, score: scoreFinal, motivo: motivo));
+        scored.add(
+            ObraRecomendada(obra: obra, score: scoreFinal, motivo: motivo));
       }
     }
 
     if (scored.isEmpty) return _fallbackDestaques(candidatas, topN: topN);
 
-    final maxScore =
-        scored.map((r) => r.score).reduce((a, b) => a > b ? a : b);
+    final maxScore = scored.map((r) => r.score).reduce((a, b) => a > b ? a : b);
     scored.sort((a, b) => b.score.compareTo(a.score));
 
     return scored
         .take(topN)
         .map((r) => ObraRecomendada(
-              obra:   r.obra,
-              score:  maxScore > 0 ? (r.score / maxScore).clamp(0.0, 1.0) : 0.0,
+              obra: r.obra,
+              score: maxScore > 0 ? (r.score / maxScore).clamp(0.0, 1.0) : 0.0,
               motivo: r.motivo,
             ))
         .toList();
@@ -415,8 +413,8 @@ class RecomendacaoService {
     final lista = destaques.isNotEmpty ? destaques : obras.take(topN).toList();
     return lista
         .map((o) => ObraRecomendada(
-              obra:   o,
-              score:  o.destaque ? 0.85 : 0.50,
+              obra: o,
+              score: o.destaque ? 0.85 : 0.50,
               motivo: o.destaque ? 'Em destaque' : 'Popular no catálogo',
             ))
         .toList();
