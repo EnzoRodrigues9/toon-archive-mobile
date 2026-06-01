@@ -1,18 +1,23 @@
+import 'dart:convert';
+import 'dart:io';
+
 import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:connectivity_plus/connectivity_plus.dart';
+import 'package:emoji_picker_flutter/emoji_picker_flutter.dart';
+import 'package:image_picker/image_picker.dart';
+import 'package:http/http.dart' as http;
 
 import '../repositories/progresso_repository.dart';
 import '../repositories/paginas_repository.dart';
 import '../repositories/capitulos_repository.dart';
 import '../services/auth_service.dart';
 import '../core/database/database_helper.dart';
+import '../core/helpers/app.config.dart';
 import '../models/pagina.dart';
 import '../models/capitulo.dart';
 import '../models/usuario.dart';
-
-import 'dart:io';
 
 class LeituraPage extends StatefulWidget {
   final String obraId;
@@ -37,6 +42,7 @@ class _LeituraPageState extends State<LeituraPage> with WidgetsBindingObserver {
   bool modoClique = false;
   bool _modoOffline = false;
   bool _capituloDisponivelOffline = false;
+  bool _naSecaoComentarios = false;
 
   PageController? controller;
 
@@ -49,8 +55,10 @@ class _LeituraPageState extends State<LeituraPage> with WidgetsBindingObserver {
   final _authService = AuthService();
   final _capitulosRepo = CapitulosRepository.instance;
   final _supabase = Supabase.instance.client;
+  final _picker = ImagePicker();
 
   final TextEditingController comentarioController = TextEditingController();
+  final TextEditingController _gifController = TextEditingController();
 
   List<Pagina> _paginas = [];
   List<Capitulo> _capitulos = [];
@@ -61,9 +69,31 @@ class _LeituraPageState extends State<LeituraPage> with WidgetsBindingObserver {
   bool _enviandoComentario = false;
   int _paginaAtual = 1;
 
+  // ── painéis mídia nos comentários ─────────────────────────
+  bool _mostrarEmoji = false;
+  bool _mostrarMidia = false;
+
+  // ── GIFs ──────────────────────────────────────────────────
+  List<Map<String, dynamic>> _gifs = [];
+  bool _carregandoGifs = false;
+
+  // ── Stickers fixos ────────────────────────────────────────
+  final List<String> _stickers = [
+    'https://media.giphy.com/media/xT9IgG50Lg7russbD6/giphy.gif',
+    'https://media.giphy.com/media/3oEjI6SIIHBdRxXI40/giphy.gif',
+    'https://media.giphy.com/media/l0MYt5jPR6QX5pnqM/giphy.gif',
+    'https://media.giphy.com/media/26ufdipQqU2lhNA4g/giphy.gif',
+    'https://media.giphy.com/media/3oz8xIsloV7zOmt81G/giphy.gif',
+    'https://media.giphy.com/media/xT5LMHxhOfscxPfIfm/giphy.gif',
+  ];
+
   Capitulo? _capituloAnterior;
   Capitulo? _proximoCapitulo;
   bool _progressoSalvo = false;
+
+  // =========================================================
+  // LIFECYCLE
+  // =========================================================
 
   @override
   void initState() {
@@ -79,6 +109,7 @@ class _LeituraPageState extends State<LeituraPage> with WidgetsBindingObserver {
     _salvarProgressoUmaVez();
     controller?.dispose();
     comentarioController.dispose();
+    _gifController.dispose();
     super.dispose();
   }
 
@@ -106,6 +137,10 @@ class _LeituraPageState extends State<LeituraPage> with WidgetsBindingObserver {
     return result.any((r) => r != ConnectivityResult.none);
   }
 
+  // =========================================================
+  // INICIALIZAÇÃO
+  // =========================================================
+
   Future<void> _inicializar() async {
     final usuario = await _authService.getUsuarioInterno();
     if (_disposed) return;
@@ -116,8 +151,6 @@ class _LeituraPageState extends State<LeituraPage> with WidgetsBindingObserver {
     final online = await _online();
     _modoOffline = !online;
 
-    // Verifica se o capítulo foi realmente baixado (disponivel_offline = 1)
-    // Consulta direta ao SQLite para não depender do modelo Capitulo
     final rows = await DatabaseHelper.instance.query(
       'capitulos',
       where: 'id = ? AND disponivel_offline = 1',
@@ -134,28 +167,31 @@ class _LeituraPageState extends State<LeituraPage> with WidgetsBindingObserver {
     if (online) await _carregarComentarios();
   }
 
+  // =========================================================
+  // PÁGINAS / CAPÍTULOS / PROGRESSO
+  // =========================================================
+
   Future<void> _carregarPaginas({bool online = true}) async {
     if (!online) {
-      // Offline: só carrega páginas com arquivo físico baixado
       if (!_capituloDisponivelOffline) {
         if (_disposed) return;
         _safeSetState(() => _paginas = []);
         return;
       }
-      final paginas = await _paginasRepo.listarPaginasBaixadas(widget.capituloId);
+      final paginas =
+          await _paginasRepo.listarPaginasBaixadas(widget.capituloId);
       if (_disposed) return;
       _safeSetState(() => _paginas = paginas);
       return;
     }
-
-    // Online: busca direto do Supabase sem salvar cache
     try {
-      final paginas = await _paginasRepo.listarParaLeituraOnline(widget.capituloId);
+      final paginas =
+          await _paginasRepo.listarParaLeituraOnline(widget.capituloId);
       if (_disposed) return;
       _safeSetState(() => _paginas = paginas);
     } catch (_) {
-      // Fallback: tenta páginas baixadas se a rede falhar
-      final paginas = await _paginasRepo.listarPaginasBaixadas(widget.capituloId);
+      final paginas =
+          await _paginasRepo.listarPaginasBaixadas(widget.capituloId);
       if (_disposed) return;
       _safeSetState(() => _paginas = paginas);
     }
@@ -223,7 +259,7 @@ class _LeituraPageState extends State<LeituraPage> with WidgetsBindingObserver {
   }
 
   // =========================================================
-  // COMENTÁRIOS — Supabase
+  // COMENTÁRIOS — texto
   // =========================================================
 
   Future<void> _carregarComentarios() async {
@@ -242,8 +278,24 @@ class _LeituraPageState extends State<LeituraPage> with WidgetsBindingObserver {
         _carregandoComentarios = false;
       });
     } catch (e) {
-      if (_disposed) return;
-      _safeSetState(() => _carregandoComentarios = false);
+      // Fallback sem join se a FK não existir no Supabase
+      try {
+        final rows = await _supabase
+            .from('comentarios')
+            .select()
+            .eq('obra_id', widget.obraId)
+            .eq('capitulo_id', widget.capituloId)
+            .order('criado_em', ascending: true);
+
+        if (_disposed) return;
+        _safeSetState(() {
+          _comentarios = List<Map<String, dynamic>>.from(rows);
+          _carregandoComentarios = false;
+        });
+      } catch (_) {
+        if (_disposed) return;
+        _safeSetState(() => _carregandoComentarios = false);
+      }
     }
   }
 
@@ -257,9 +309,42 @@ class _LeituraPageState extends State<LeituraPage> with WidgetsBindingObserver {
       return;
     }
 
-    _safeSetState(() => _enviandoComentario = true);
+    _safeSetState(() {
+      _enviandoComentario = true;
+      _mostrarEmoji = false;
+    });
     comentarioController.clear();
 
+    // Garante que o usuário existe no Supabase antes de inserir o comentário.
+    // Necessário para contas Google cujo upsert pode ter falhado silenciosamente.
+    await _authService.garantirUsuarioNoSupabase(_usuario!);
+
+    try {
+      await _supabase.from('comentarios').insert({
+        'usuario_id': _usuario!.id,
+        'obra_id': widget.obraId,
+        'capitulo_id': widget.capituloId,
+        'conteudo': texto,
+      });
+      await _carregarComentarios();
+    } catch (e) {
+      if (_disposed) return;
+      ScaffoldMessenger.of(context)
+          .showSnackBar(SnackBar(content: Text('Erro ao comentar: $e')));
+    } finally {
+      if (mounted) _safeSetState(() => _enviandoComentario = false);
+    }
+  }
+
+  // ── Enviar mídia (gif / sticker / imagem) ─────────────────
+  Future<void> _enviarMidiaComentario({
+    required String tipo,
+    required String conteudo,
+    required String? mediaUrl,
+  }) async {
+    if (_usuario == null) return;
+    _safeSetState(() => _enviandoComentario = true);
+    await _authService.garantirUsuarioNoSupabase(_usuario!);
     try {
       final row = await _supabase
           .from('comentarios')
@@ -267,7 +352,9 @@ class _LeituraPageState extends State<LeituraPage> with WidgetsBindingObserver {
             'usuario_id': _usuario!.id,
             'obra_id': widget.obraId,
             'capitulo_id': widget.capituloId,
-            'conteudo': texto,
+            'conteudo': conteudo,
+            'tipo': tipo,
+            'media_url': mediaUrl,
           })
           .select('*, usuarios(nome)')
           .single();
@@ -280,12 +367,77 @@ class _LeituraPageState extends State<LeituraPage> with WidgetsBindingObserver {
     } catch (e) {
       if (_disposed) return;
       _safeSetState(() => _enviandoComentario = false);
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('Erro ao comentar: $e')),
-      );
+      ScaffoldMessenger.of(context)
+          .showSnackBar(SnackBar(content: Text('Erro ao enviar mídia: $e')));
     }
   }
 
+  // ── Upload de foto ─────────────────────────────────────────
+  Future<void> _enviarFoto({bool camera = false}) async {
+    _safeSetState(() => _mostrarMidia = false);
+    final xfile = await _picker.pickImage(
+      source: camera ? ImageSource.camera : ImageSource.gallery,
+      imageQuality: 70,
+      maxWidth: 1200,
+    );
+    if (xfile == null) return;
+
+    _safeSetState(() => _enviandoComentario = true);
+    try {
+      final bytes = await xfile.readAsBytes();
+      final ext = xfile.path.split('.').last;
+      final path =
+          'comentarios/${widget.obraId}/${_usuario!.id}_${DateTime.now().millisecondsSinceEpoch}.$ext';
+
+      await _supabase.storage.from('chat-media').uploadBinary(
+            path,
+            bytes,
+            fileOptions: FileOptions(contentType: 'image/$ext'),
+          );
+
+      final url = _supabase.storage.from('chat-media').getPublicUrl(path);
+      await _enviarMidiaComentario(
+          tipo: 'imagem', conteudo: '📷 Foto', mediaUrl: url);
+    } catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context)
+          .showSnackBar(SnackBar(content: Text('Erro no upload: $e')));
+    } finally {
+      if (mounted) _safeSetState(() => _enviandoComentario = false);
+    }
+  }
+
+  // ── Buscar GIFs (Giphy) ────────────────────────────────────
+  Future<void> _buscarGifs(String query) async {
+    _safeSetState(() => _carregandoGifs = true);
+    try {
+      final endpoint = query.isEmpty
+          ? 'https://api.giphy.com/v1/gifs/trending'
+          : 'https://api.giphy.com/v1/gifs/search';
+      final uri = Uri.parse(endpoint).replace(queryParameters: {
+        'api_key': AppConfig.giphyApiKey,
+        'limit': '20',
+        'rating': 'g',
+        if (query.isNotEmpty) 'q': query,
+      });
+      final resp = await http.get(uri);
+      final json = jsonDecode(resp.body);
+      final data = json['data'] as List;
+      _safeSetState(() {
+        _gifs = data
+            .map((g) => {
+                  'preview': g['images']['fixed_height_small']['url'] as String,
+                  'url': g['images']['original']['url'] as String,
+                })
+            .toList();
+        _carregandoGifs = false;
+      });
+    } catch (_) {
+      _safeSetState(() => _carregandoGifs = false);
+    }
+  }
+
+  // ── Editar / Excluir ───────────────────────────────────────
   Future<void> _editarComentario(Map<String, dynamic> comentario) async {
     comentarioController.text = comentario['conteudo'];
     final salvar = await showDialog<bool>(
@@ -327,9 +479,8 @@ class _LeituraPageState extends State<LeituraPage> with WidgetsBindingObserver {
       });
     } catch (e) {
       if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('Erro ao editar: $e')),
-      );
+      ScaffoldMessenger.of(context)
+          .showSnackBar(SnackBar(content: Text('Erro ao editar: $e')));
     }
     comentarioController.clear();
   }
@@ -356,20 +507,18 @@ class _LeituraPageState extends State<LeituraPage> with WidgetsBindingObserver {
 
     try {
       await _supabase.from('comentarios').delete().eq('id', comentario['id']);
-
       if (_disposed) return;
       _safeSetState(
           () => _comentarios.removeWhere((c) => c['id'] == comentario['id']));
     } catch (e) {
       if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('Erro ao excluir: $e')),
-      );
+      ScaffoldMessenger.of(context)
+          .showSnackBar(SnackBar(content: Text('Erro ao excluir: $e')));
     }
   }
 
-  bool _eMeuComentario(Map<String, dynamic> comentario) =>
-      comentario['usuario_id'] == _usuario?.id || _usuario?.role == 'admin';
+  bool _eMeuComentario(Map<String, dynamic> c) =>
+      c['usuario_id'] == _usuario?.id || _usuario?.role == 'admin';
 
   String _formatarData(String iso) {
     final dt = DateTime.parse(iso).toLocal();
@@ -500,237 +649,547 @@ class _LeituraPageState extends State<LeituraPage> with WidgetsBindingObserver {
   }
 
   // =========================================================
-  // WIDGET COMENTÁRIOS
+  // WIDGET COMENTÁRIOS (completo)
+  // =========================================================
+
+  // =========================================================
+  // WIDGET COMENTÁRIOS — só o conteúdo (input fica no bottomNavigationBar)
   // =========================================================
 
   Widget comentariosWidget() {
     final roxo = Theme.of(context).colorScheme.primary;
     final isDark = Theme.of(context).brightness == Brightness.dark;
 
-    return Container(
-      color: isDark ? const Color(0xFF140F1F) : Colors.white,
-      child: Column(children: [
-        const SizedBox(height: 12),
-        Container(
-          width: 60,
-          height: 4,
-          decoration: BoxDecoration(
-            color: roxo.withOpacity(0.35),
-            borderRadius: BorderRadius.circular(999),
-          ),
-        ),
-        const SizedBox(height: 14),
-
-        // Botão próximo capítulo
-        Padding(
-          padding: const EdgeInsets.symmetric(horizontal: 16),
-          child: _proximoCapitulo != null
-              ? SizedBox(
-                  width: double.infinity,
-                  child: ElevatedButton.icon(
-                    onPressed: () => _irParaCapitulo(_proximoCapitulo!),
-                    style: ElevatedButton.styleFrom(
-                      backgroundColor: roxo,
-                      foregroundColor: Colors.white,
-                      elevation: 0,
-                      padding: const EdgeInsets.symmetric(vertical: 14),
-                      shape: RoundedRectangleBorder(
-                          borderRadius: BorderRadius.circular(16)),
-                    ),
-                    icon: const Icon(Icons.arrow_forward_rounded),
-                    label: Text(
-                      'Próximo: ${_proximoCapitulo!.titulo}',
-                      style: const TextStyle(fontWeight: FontWeight.w700),
-                    ),
-                  ),
-                )
-              : Container(
-                  width: double.infinity,
-                  padding: const EdgeInsets.symmetric(vertical: 14),
-                  decoration: BoxDecoration(
-                    color: roxo.withOpacity(0.08),
-                    borderRadius: BorderRadius.circular(16),
-                  ),
-                  child: Row(
-                      mainAxisAlignment: MainAxisAlignment.center,
-                      children: [
-                        Icon(Icons.check_circle_rounded, color: roxo, size: 20),
-                        const SizedBox(width: 8),
-                        Text('Último capítulo disponível',
-                            style: TextStyle(
-                                color: roxo, fontWeight: FontWeight.w700)),
-                      ]),
+    return SingleChildScrollView(
+      // ← AQUI está a correção principal
+      padding: EdgeInsets.only(
+        bottom:
+            MediaQuery.of(context).viewInsets.bottom + 80, // espaço pro input
+      ),
+      child: Container(
+        color: isDark ? const Color(0xFF140F1F) : Colors.white,
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            const SizedBox(height: 12),
+            Center(
+              child: Container(
+                width: 60,
+                height: 4,
+                decoration: BoxDecoration(
+                  color: roxo.withOpacity(0.35),
+                  borderRadius: BorderRadius.circular(999),
                 ),
-        ),
+              ),
+            ),
+            const SizedBox(height: 14),
 
-        const SizedBox(height: 20),
-
-        Text('Comentários',
-            style: TextStyle(
-                fontSize: 19, fontWeight: FontWeight.w800, color: roxo)),
-        const SizedBox(height: 12),
-
-        // Campo de novo comentário
-        Padding(
-          padding: const EdgeInsets.symmetric(horizontal: 12),
-          child: _modoOffline
-              ? Container(
-                  padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
-                  decoration: BoxDecoration(
-                    color: isDark ? const Color(0xFF231840) : const Color(0xFFF5F3FF),
-                    borderRadius: BorderRadius.circular(14),
-                  ),
-                  child: Row(children: [
-                    Icon(Icons.wifi_off_rounded, size: 16, color: isDark ? Colors.white38 : Colors.black38),
-                    const SizedBox(width: 8),
-                    Text('Sem conexão para comentar',
-                        style: TextStyle(color: isDark ? Colors.white38 : Colors.black38, fontSize: 13)),
-                  ]),
-                )
-              : TextField(
-            controller: comentarioController,
-            style: TextStyle(color: isDark ? Colors.white : Colors.black87),
-            maxLines: null,
-            decoration: InputDecoration(
-              hintText: 'Digite um comentário...',
-              hintStyle:
-                  TextStyle(color: isDark ? Colors.white38 : Colors.black38),
-              suffixIcon: _enviandoComentario
-                  ? const Padding(
-                      padding: EdgeInsets.all(12),
-                      child: SizedBox(
-                          width: 20,
-                          height: 20,
-                          child: CircularProgressIndicator(strokeWidth: 2)),
+            // Botão próximo capítulo
+            Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 16),
+              child: _proximoCapitulo != null
+                  ? SizedBox(
+                      width: double.infinity,
+                      child: ElevatedButton.icon(
+                        onPressed: () => _irParaCapitulo(_proximoCapitulo!),
+                        style: ElevatedButton.styleFrom(
+                          backgroundColor: roxo,
+                          foregroundColor: Colors.white,
+                          elevation: 0,
+                          padding: const EdgeInsets.symmetric(vertical: 14),
+                          shape: RoundedRectangleBorder(
+                              borderRadius: BorderRadius.circular(16)),
+                        ),
+                        icon: const Icon(Icons.arrow_forward_rounded),
+                        label: Text('Próximo: ${_proximoCapitulo!.titulo}',
+                            style:
+                                const TextStyle(fontWeight: FontWeight.w700)),
+                      ),
                     )
-                  : IconButton(
-                      icon: Icon(Icons.send_rounded, color: roxo),
-                      onPressed: _adicionarComentario,
+                  : Container(
+                      width: double.infinity,
+                      padding: const EdgeInsets.symmetric(vertical: 14),
+                      decoration: BoxDecoration(
+                        color: roxo.withOpacity(0.08),
+                        borderRadius: BorderRadius.circular(16),
+                      ),
+                      child: Row(
+                        mainAxisAlignment: MainAxisAlignment.center,
+                        children: [
+                          Icon(Icons.check_circle_rounded,
+                              color: roxo, size: 20),
+                          const SizedBox(width: 8),
+                          Text('Último capítulo disponível',
+                              style: TextStyle(
+                                  color: roxo, fontWeight: FontWeight.w700)),
+                        ],
+                      ),
                     ),
-              filled: true,
-              fillColor:
-                  isDark ? const Color(0xFF231840) : const Color(0xFFF5F3FF),
-              contentPadding:
-                  const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
-              border: OutlineInputBorder(
-                  borderRadius: BorderRadius.circular(14),
-                  borderSide: BorderSide.none),
-              focusedBorder: OutlineInputBorder(
-                  borderRadius: BorderRadius.circular(14),
-                  borderSide: BorderSide(color: roxo, width: 1.2)),
             ),
-          ),
-        ),
-        const SizedBox(height: 8),
+            const SizedBox(height: 20),
 
-        // Lista de comentários
-        if (_carregandoComentarios)
-          Padding(
-            padding: const EdgeInsets.all(24),
-            child: CircularProgressIndicator(color: roxo),
-          )
-        else if (_modoOffline)
-          Padding(
-            padding: const EdgeInsets.all(24),
-            child: Row(mainAxisAlignment: MainAxisAlignment.center, children: [
-              Icon(Icons.wifi_off_rounded, color: isDark ? Colors.white38 : Colors.black38, size: 18),
-              const SizedBox(width: 8),
-              Text(
-                'Comentários indisponíveis offline.',
-                style: TextStyle(color: isDark ? Colors.white38 : Colors.black38),
-              ),
-            ]),
-          )
-        else if (_comentarios.isEmpty)
-          Padding(
-            padding: const EdgeInsets.all(24),
-            child: Text(
-              'Nenhum comentário ainda. Seja o primeiro!',
-              style: TextStyle(color: isDark ? Colors.white38 : Colors.black38),
+            Center(
+              child: Text('Comentários',
+                  style: TextStyle(
+                      fontSize: 19, fontWeight: FontWeight.w800, color: roxo)),
             ),
-          )
-        else
-          ..._comentarios.map((comentario) {
-            final eMeu = _eMeuComentario(comentario);
-            final nomeUsuario = comentario['usuarios']?['nome'] ?? 'Usuário';
-            return Container(
-              margin: const EdgeInsets.symmetric(horizontal: 12, vertical: 5),
-              decoration: BoxDecoration(
-                color:
-                    isDark ? const Color(0xFF20172C) : const Color(0xFFF7F2FF),
-                borderRadius: BorderRadius.circular(16),
-                border: Border.all(color: roxo.withOpacity(0.10)),
-              ),
-              child: Padding(
-                padding: const EdgeInsets.all(12),
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    // Cabeçalho: nome + hora + botões
-                    Row(children: [
-                      Text(
-                        nomeUsuario,
-                        style: TextStyle(
-                            color: roxo,
-                            fontWeight: FontWeight.w800,
-                            fontSize: 13),
-                      ),
-                      const SizedBox(width: 8),
-                      Text(
-                        _formatarData(comentario['criado_em'] ?? ''),
-                        style: TextStyle(
-                            fontSize: 11,
-                            color: isDark ? Colors.white38 : Colors.black38),
-                      ),
-                      if (comentario['editado'] == 1 ||
-                          comentario['editado'] == true)
-                        Padding(
-                          padding: const EdgeInsets.only(left: 4),
-                          child: Text(
-                            '(editado)',
+            const SizedBox(height: 12),
+
+            if (_carregandoComentarios)
+              const Padding(
+                padding: EdgeInsets.all(24),
+                child: Center(child: CircularProgressIndicator()),
+              )
+            else if (_modoOffline)
+              Padding(
+                padding: const EdgeInsets.all(24),
+                child:
+                    Row(mainAxisAlignment: MainAxisAlignment.center, children: [
+                  Icon(Icons.wifi_off_rounded,
+                      color: isDark ? Colors.white38 : Colors.black38,
+                      size: 18),
+                  const SizedBox(width: 8),
+                  Text('Comentários indisponíveis offline.',
+                      style: TextStyle(
+                          color: isDark ? Colors.white38 : Colors.black38)),
+                ]),
+              )
+            else if (_comentarios.isEmpty)
+              Padding(
+                padding: const EdgeInsets.all(24),
+                child: Center(
+                  child: Text(
+                    'Nenhum comentário ainda. Seja o primeiro!',
+                    style: TextStyle(
+                        color: isDark ? Colors.white38 : Colors.black38),
+                  ),
+                ),
+              )
+            else
+              ..._comentarios.map((comentario) {
+                final eMeu = _eMeuComentario(comentario);
+                final nomeUsuario =
+                    comentario['usuarios']?['nome'] ?? 'Usuário';
+                final tipo = comentario['tipo'] as String? ?? 'texto';
+                final eMidia =
+                    tipo == 'imagem' || tipo == 'gif' || tipo == 'sticker';
+
+                return Container(
+                  margin:
+                      const EdgeInsets.symmetric(horizontal: 12, vertical: 5),
+                  decoration: BoxDecoration(
+                    color: isDark
+                        ? const Color(0xFF20172C)
+                        : const Color(0xFFF7F2FF),
+                    borderRadius: BorderRadius.circular(16),
+                    border: Border.all(color: roxo.withOpacity(0.10)),
+                  ),
+                  child: Padding(
+                    padding: const EdgeInsets.all(12),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Row(children: [
+                          Text(nomeUsuario,
+                              style: TextStyle(
+                                  color: roxo,
+                                  fontWeight: FontWeight.w800,
+                                  fontSize: 13)),
+                          const SizedBox(width: 8),
+                          Text(
+                            _formatarData(comentario['criado_em'] ?? ''),
                             style: TextStyle(
-                                fontSize: 10,
+                                fontSize: 11,
                                 color:
                                     isDark ? Colors.white38 : Colors.black38),
                           ),
-                        ),
-                      const Spacer(),
-                      if (eMeu) ...[
-                        GestureDetector(
-                          onTap: () => _editarComentario(comentario),
-                          child:
-                              Icon(Icons.edit_rounded, color: roxo, size: 18),
-                        ),
-                        const SizedBox(width: 8),
-                        GestureDetector(
-                          onTap: () => _excluirComentario(comentario),
-                          child: const Icon(Icons.delete_rounded,
-                              color: Colors.redAccent, size: 18),
-                        ),
+                          if (comentario['editado'] == 1 ||
+                              comentario['editado'] == true)
+                            Padding(
+                              padding: const EdgeInsets.only(left: 4),
+                              child: Text('(editado)',
+                                  style: TextStyle(
+                                      fontSize: 10,
+                                      color: isDark
+                                          ? Colors.white38
+                                          : Colors.black38)),
+                            ),
+                          const Spacer(),
+                          if (eMeu) ...[
+                            if (!eMidia)
+                              GestureDetector(
+                                onTap: () => _editarComentario(comentario),
+                                child: Icon(Icons.edit_rounded,
+                                    color: roxo, size: 18),
+                              ),
+                            if (!eMidia) const SizedBox(width: 8),
+                            GestureDetector(
+                              onTap: () => _excluirComentario(comentario),
+                              child: const Icon(Icons.delete_rounded,
+                                  color: Colors.redAccent, size: 18),
+                            ),
+                          ],
+                        ]),
+                        const SizedBox(height: 6),
+                        if (eMidia && comentario['media_url'] != null)
+                          ClipRRect(
+                            borderRadius: BorderRadius.circular(10),
+                            child: Image.network(
+                              comentario['media_url'],
+                              width: tipo == 'sticker' ? 100 : double.infinity,
+                              fit: BoxFit.cover,
+                              errorBuilder: (_, __, ___) => const Icon(
+                                  Icons.broken_image_rounded,
+                                  size: 40,
+                                  color: Colors.grey),
+                            ),
+                          )
+                        else
+                          Text(
+                            comentario['conteudo'] ?? '',
+                            style: TextStyle(
+                                fontSize: 14,
+                                height: 1.4,
+                                color: isDark ? Colors.white : Colors.black87),
+                          ),
                       ],
-                    ]),
-                    const SizedBox(height: 6),
-                    // Conteúdo
-                    Text(
-                      comentario['conteudo'],
-                      style: TextStyle(
-                          fontSize: 14,
-                          height: 1.4,
-                          color: isDark ? Colors.white : Colors.black87),
                     ),
-                  ],
+                  ),
+                );
+              }),
+          ],
+        ),
+      ),
+    );
+  }
+
+  // Input fixo — renderizado como bottomNavigationBar do Scaffold principal
+  Widget _inputComentario(bool isDark, Color roxo) {
+    return Container(
+      color: isDark ? const Color(0xFF1A1030) : Colors.white,
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Divider(height: 1, color: roxo.withOpacity(0.12)),
+          if (_mostrarEmoji)
+            SizedBox(
+              height: 260,
+              child: EmojiPicker(
+                onEmojiSelected: (_, emoji) {
+                  comentarioController.text += emoji.emoji;
+                  comentarioController.selection = TextSelection.fromPosition(
+                      TextPosition(offset: comentarioController.text.length));
+                },
+                config: Config(
+                  height: 260,
+                  emojiViewConfig: EmojiViewConfig(
+                    backgroundColor:
+                        isDark ? const Color(0xFF1A1030) : Colors.white,
+                  ),
+                  categoryViewConfig: CategoryViewConfig(
+                    backgroundColor:
+                        isDark ? const Color(0xFF1A1030) : Colors.white,
+                    iconColor: isDark ? Colors.white38 : Colors.black38,
+                    iconColorSelected: roxo,
+                    indicatorColor: roxo,
+                  ),
                 ),
               ),
-            );
-          }),
-
-        const SizedBox(height: 24),
-      ]),
+            ),
+          if (_mostrarMidia) _buildPainelMidia(isDark, roxo),
+          if (_modoOffline)
+            SafeArea(
+              top: false,
+              child: Padding(
+                padding: const EdgeInsets.fromLTRB(12, 8, 12, 8),
+                child: Container(
+                  padding:
+                      const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+                  decoration: BoxDecoration(
+                    color: isDark
+                        ? const Color(0xFF231840)
+                        : const Color(0xFFF5F3FF),
+                    borderRadius: BorderRadius.circular(14),
+                  ),
+                  child: Row(children: [
+                    Icon(Icons.wifi_off_rounded,
+                        size: 16,
+                        color: isDark ? Colors.white38 : Colors.black38),
+                    const SizedBox(width: 8),
+                    Text('Sem conexão para comentar',
+                        style: TextStyle(
+                            color: isDark ? Colors.white38 : Colors.black38,
+                            fontSize: 13)),
+                  ]),
+                ),
+              ),
+            )
+          else
+            // ← padding dinâmico com viewInsets.bottom, igual ao grupo_chat
+            Padding(
+              padding: const EdgeInsets.fromLTRB(8, 8, 8, 8),
+              child: Row(children: [
+                IconButton(
+                  icon: Icon(
+                    _mostrarEmoji
+                        ? Icons.keyboard_rounded
+                        : Icons.emoji_emotions_rounded,
+                    color: roxo,
+                  ),
+                  onPressed: () async {
+                    FocusScope.of(context).unfocus();
+                    await Future.delayed(const Duration(milliseconds: 150));
+                    if (!mounted) return;
+                    _safeSetState(() {
+                      _mostrarEmoji = !_mostrarEmoji;
+                      if (_mostrarEmoji) _mostrarMidia = false;
+                    });
+                  },
+                ),
+                Expanded(
+                  child: TextField(
+                    controller: comentarioController,
+                    style: TextStyle(
+                        color: isDark ? Colors.white : Colors.black87),
+                    maxLines: null,
+                    onTap: () => _safeSetState(() {
+                      _mostrarEmoji = false;
+                      _mostrarMidia = false;
+                    }),
+                    decoration: InputDecoration(
+                      hintText: 'Digite um comentário...',
+                      hintStyle: TextStyle(
+                          color: isDark ? Colors.white38 : Colors.black38),
+                      filled: true,
+                      fillColor: isDark
+                          ? const Color(0xFF231840)
+                          : const Color(0xFFF5F3FF),
+                      contentPadding: const EdgeInsets.symmetric(
+                          horizontal: 16, vertical: 12),
+                      border: OutlineInputBorder(
+                          borderRadius: BorderRadius.circular(14),
+                          borderSide: BorderSide.none),
+                      focusedBorder: OutlineInputBorder(
+                          borderRadius: BorderRadius.circular(14),
+                          borderSide: BorderSide(color: roxo, width: 1.2)),
+                    ),
+                  ),
+                ),
+                IconButton(
+                  icon: Icon(
+                    _mostrarMidia
+                        ? Icons.close_rounded
+                        : Icons.add_circle_rounded,
+                    color: roxo,
+                  ),
+                  onPressed: () async {
+                    FocusScope.of(context).unfocus();
+                    await Future.delayed(const Duration(milliseconds: 150));
+                    if (!mounted) return;
+                    _safeSetState(() {
+                      _mostrarMidia = !_mostrarMidia;
+                      if (_mostrarMidia) _mostrarEmoji = false;
+                    });
+                  },
+                ),
+                GestureDetector(
+                  onTap: _enviandoComentario ? null : _adicionarComentario,
+                  child: Container(
+                    padding: const EdgeInsets.all(10),
+                    decoration: BoxDecoration(
+                      gradient: LinearGradient(
+                          colors: [roxo, const Color(0xFF9F67FA)]),
+                      shape: BoxShape.circle,
+                    ),
+                    child: _enviandoComentario
+                        ? const SizedBox(
+                            width: 18,
+                            height: 18,
+                            child: CircularProgressIndicator(
+                                color: Colors.white, strokeWidth: 2))
+                        : const Icon(Icons.send_rounded,
+                            color: Colors.white, size: 18),
+                  ),
+                ),
+              ]),
+            ),
+        ],
+      ),
     );
   }
 
   // =========================================================
-  // BUILD
+  // PAINEL MÍDIA (GIF / Sticker / Foto)
+  // =========================================================
+
+  Widget _buildPainelMidia(bool isDark, Color roxo) {
+    return Container(
+      height: 320,
+      color: isDark ? const Color(0xFF1A1030) : Colors.white,
+      child: DefaultTabController(
+        length: 3,
+        child: Column(children: [
+          TabBar(
+            indicatorColor: roxo,
+            labelColor: roxo,
+            unselectedLabelColor: isDark ? Colors.white38 : Colors.black38,
+            tabs: const [
+              Tab(icon: Icon(Icons.gif_box_rounded), text: 'GIFs'),
+              Tab(icon: Icon(Icons.emoji_emotions_rounded), text: 'Stickers'),
+              Tab(icon: Icon(Icons.photo_rounded), text: 'Foto'),
+            ],
+          ),
+          Expanded(
+            child: TabBarView(children: [
+              // ── GIFs ──────────────────────────────────
+              Column(children: [
+                Padding(
+                  padding: const EdgeInsets.all(8),
+                  child: TextField(
+                    controller: _gifController,
+                    onSubmitted: _buscarGifs,
+                    style: TextStyle(
+                        color: isDark ? Colors.white : Colors.black87),
+                    decoration: InputDecoration(
+                      hintText: 'Buscar GIF...',
+                      prefixIcon: Icon(Icons.search_rounded, color: roxo),
+                      suffixIcon: IconButton(
+                        icon: Icon(Icons.send_rounded, color: roxo),
+                        onPressed: () => _buscarGifs(_gifController.text),
+                      ),
+                      filled: true,
+                      fillColor: isDark
+                          ? const Color(0xFF231840)
+                          : const Color(0xFFF5F3FF),
+                      border: OutlineInputBorder(
+                          borderRadius: BorderRadius.circular(12),
+                          borderSide: BorderSide.none),
+                    ),
+                  ),
+                ),
+                Expanded(
+                  child: _carregandoGifs
+                      ? Center(child: CircularProgressIndicator(color: roxo))
+                      : _gifs.isEmpty
+                          ? Center(
+                              child: ElevatedButton.icon(
+                                onPressed: () => _buscarGifs(''),
+                                icon: const Icon(Icons.trending_up_rounded),
+                                label: const Text('Ver trending'),
+                                style: ElevatedButton.styleFrom(
+                                    backgroundColor: roxo,
+                                    foregroundColor: Colors.white),
+                              ),
+                            )
+                          : GridView.builder(
+                              padding:
+                                  const EdgeInsets.symmetric(horizontal: 8),
+                              gridDelegate:
+                                  const SliverGridDelegateWithFixedCrossAxisCount(
+                                      crossAxisCount: 3,
+                                      crossAxisSpacing: 4,
+                                      mainAxisSpacing: 4),
+                              itemCount: _gifs.length,
+                              itemBuilder: (_, i) => GestureDetector(
+                                onTap: () async {
+                                  _safeSetState(() => _mostrarMidia = false);
+                                  await _enviarMidiaComentario(
+                                    tipo: 'gif',
+                                    conteudo: '🎞️ GIF',
+                                    mediaUrl: _gifs[i]['url'],
+                                  );
+                                },
+                                child: ClipRRect(
+                                  borderRadius: BorderRadius.circular(8),
+                                  child: Image.network(
+                                    _gifs[i]['preview'],
+                                    fit: BoxFit.cover,
+                                    errorBuilder: (_, __, ___) =>
+                                        Container(color: roxo.withOpacity(0.1)),
+                                  ),
+                                ),
+                              ),
+                            ),
+                ),
+              ]),
+
+              // ── Stickers ──────────────────────────────
+              GridView.builder(
+                padding: const EdgeInsets.all(8),
+                gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
+                    crossAxisCount: 3, crossAxisSpacing: 6, mainAxisSpacing: 6),
+                itemCount: _stickers.length,
+                itemBuilder: (_, i) => GestureDetector(
+                  onTap: () async {
+                    _safeSetState(() => _mostrarMidia = false);
+                    await _enviarMidiaComentario(
+                      tipo: 'sticker',
+                      conteudo: '🪄 Sticker',
+                      mediaUrl: _stickers[i],
+                    );
+                  },
+                  child: ClipRRect(
+                    borderRadius: BorderRadius.circular(12),
+                    child: Image.network(_stickers[i],
+                        fit: BoxFit.cover,
+                        errorBuilder: (_, __, ___) => Container(
+                            color: roxo.withOpacity(0.1),
+                            child:
+                                Icon(Icons.broken_image_rounded, color: roxo))),
+                  ),
+                ),
+              ),
+
+              // ── Foto ──────────────────────────────────
+              Column(mainAxisAlignment: MainAxisAlignment.center, children: [
+                Row(
+                    mainAxisAlignment: MainAxisAlignment.spaceEvenly,
+                    children: [
+                      _botaoFoto(
+                          icon: Icons.photo_library_rounded,
+                          label: 'Galeria',
+                          roxo: roxo,
+                          onTap: () => _enviarFoto()),
+                      _botaoFoto(
+                          icon: Icons.camera_alt_rounded,
+                          label: 'Câmera',
+                          roxo: roxo,
+                          onTap: () => _enviarFoto(camera: true)),
+                    ]),
+              ]),
+            ]),
+          ),
+        ]),
+      ),
+    );
+  }
+
+  Widget _botaoFoto({
+    required IconData icon,
+    required String label,
+    required Color roxo,
+    required VoidCallback onTap,
+  }) =>
+      GestureDetector(
+        onTap: onTap,
+        child: Column(children: [
+          Container(
+            padding: const EdgeInsets.all(20),
+            decoration: BoxDecoration(
+              color: roxo.withOpacity(0.12),
+              shape: BoxShape.circle,
+              border: Border.all(color: roxo.withOpacity(0.3)),
+            ),
+            child: Icon(icon, color: roxo, size: 32),
+          ),
+          const SizedBox(height: 8),
+          Text(label,
+              style: TextStyle(color: roxo, fontWeight: FontWeight.w700)),
+        ]),
+      );
+
+  // =========================================================
+  // BUILD PRINCIPAL
   // =========================================================
 
   @override
@@ -742,13 +1201,14 @@ class _LeituraPageState extends State<LeituraPage> with WidgetsBindingObserver {
     final isDark = Theme.of(context).brightness == Brightness.dark;
     final roxo = isDark ? const Color(0xFF9F67FA) : const Color(0xFF7C3AED);
 
-    // Bloqueio offline: capítulo não baixado
     if (_modoOffline && !_capituloDisponivelOffline) {
       return _buildBloqueioOffline(isDark, roxo);
     }
 
     return Scaffold(
       backgroundColor: isDark ? Colors.black : const Color(0xFFF7F4FB),
+      resizeToAvoidBottomInset:
+          false, // ← chave: não redimensiona, gerenciamos manualmente
       appBar: AppBar(
         backgroundColor: isDark ? const Color(0xFF1A1030) : roxo,
         foregroundColor: Colors.white,
@@ -770,38 +1230,100 @@ class _LeituraPageState extends State<LeituraPage> with WidgetsBindingObserver {
           ),
         ],
       ),
-      body: Column(children: [
-        _buildNavCapitulos(isDark, roxo),
-        Expanded(
-          child: modoClique
-              ? PageView.builder(
-                  controller: controller,
-                  itemCount: _paginas.length + 1,
-                  onPageChanged: (index) async {
-                    if (index < _paginas.length) {
-                      _paginaAtual = index + 1;
-                      await _marcarConcluidoSeNecessario(index);
-                    }
-                  },
-                  itemBuilder: (context, index) {
-                    if (index < _paginas.length) {
-                      return _buildPaginaClique(index, isDark);
-                    }
-                    return SingleChildScrollView(child: comentariosWidget());
-                  },
-                )
-              : ListView.builder(
-                  itemCount: _paginas.length + 1,
-                  itemBuilder: (context, index) {
-                    if (index < _paginas.length) {
-                      return _buildPaginaRolagem(index, isDark);
-                    }
-                    return comentariosWidget();
-                  },
-                ),
-        ),
-      ]),
+      // ← sem bottomNavigationBar; o input fica embutido em cada modo
+      body: Stack(
+        children: [
+          Column(children: [
+            _buildNavCapitulos(isDark, roxo),
+            Expanded(
+              child: modoClique
+                  ? PageView.builder(
+                      controller: controller,
+                      itemCount: _paginas.length + 1,
+                      onPageChanged: (index) {
+                        _safeSetState(() =>
+                            _naSecaoComentarios = index == _paginas.length);
+                        if (index < _paginas.length) {
+                          _paginaAtual = index + 1;
+                          _marcarConcluidoSeNecessario(index);
+                        }
+                      },
+                      itemBuilder: (context, index) {
+                        if (index < _paginas.length) {
+                          return _buildPaginaClique(index, isDark);
+                        }
+                        // Modo clique: página de comentários auto-contida com input fixo
+                        return _comentariosPageFull(isDark, roxo);
+                      },
+                    )
+                  : NotificationListener<ScrollNotification>(
+                      onNotification: (n) {
+                        if (n is ScrollUpdateNotification) {
+                          final atBottom = n.metrics.pixels >=
+                              n.metrics.maxScrollExtent - 200;
+                          if (atBottom != _naSecaoComentarios) {
+                            _safeSetState(() => _naSecaoComentarios = atBottom);
+                          }
+                        }
+                        return false;
+                      },
+                      child: ListView.builder(
+                        itemCount: _paginas.length + 1,
+                        itemBuilder: (context, index) {
+                          if (index < _paginas.length) {
+                            return _buildPaginaRolagem(index, isDark);
+                          }
+                          // Modo rolagem: comentários com espaço pro input flutuante
+                          return Padding(
+                            padding: const EdgeInsets.only(bottom: 80),
+                            child: comentariosWidget(),
+                          );
+                        },
+                      ),
+                    ),
+            ),
+          ]),
+
+          // Modo rolagem: input flutua no fundo quando na seção de comentários
+          if (!modoClique && _naSecaoComentarios)
+            Positioned(
+              bottom: MediaQuery.of(context).viewInsets.bottom,
+              left: 0,
+              right: 0,
+              child: SafeArea(
+                top: false,
+                child: _inputComentario(isDark, roxo),
+              ),
+            ),
+        ],
+      ),
     );
+  }
+
+  Widget _comentariosPageFull(bool isDark, Color roxo) {
+    return Column(
+      children: [
+        Expanded(
+          child: SingleChildScrollView(
+            padding: const EdgeInsets.only(bottom: 8),
+            child: comentariosWidget(),
+          ),
+        ),
+        _inputComentario(isDark, roxo), // ← fixo no fundo da página
+      ],
+    );
+  }
+
+  @override
+  void didChangeMetrics() {
+    final bottomInset = WidgetsBinding
+        .instance.platformDispatcher.views.first.viewInsets.bottom;
+    if (bottomInset > 100 && (_mostrarEmoji || _mostrarMidia)) {
+      _safeSetState(() {
+        _mostrarEmoji = false;
+        _mostrarMidia = false;
+      });
+    }
   }
 
   // =========================================================
@@ -854,16 +1376,13 @@ class _LeituraPageState extends State<LeituraPage> with WidgetsBindingObserver {
 
   Widget _buildImagem(Pagina pagina) {
     final localPath = pagina.imagemLocal;
-    // Usa arquivo local apenas se o caminho existe e o arquivo está no disco
     if (localPath != null && localPath.isNotEmpty) {
-      final file = File(localPath);
       return Image.file(
-        file,
+        File(localPath),
         fit: BoxFit.fitWidth,
         errorBuilder: (_, __, ___) => _erroImagem(),
       );
     }
-    // Online: usa URL da rede
     return Image.network(
       pagina.imagemUrl,
       fit: BoxFit.fitWidth,
@@ -874,7 +1393,8 @@ class _LeituraPageState extends State<LeituraPage> with WidgetsBindingObserver {
           child: Center(
             child: CircularProgressIndicator(
               value: progress.expectedTotalBytes != null
-                  ? progress.cumulativeBytesLoaded / progress.expectedTotalBytes!
+                  ? progress.cumulativeBytesLoaded /
+                      progress.expectedTotalBytes!
                   : null,
               strokeWidth: 2,
             ),
@@ -899,7 +1419,8 @@ class _LeituraPageState extends State<LeituraPage> with WidgetsBindingObserver {
       );
 
   Widget _buildBloqueioOffline(bool isDark, Color roxo) => Scaffold(
-        backgroundColor: isDark ? const Color(0xFF0F0A1E) : const Color(0xFFF5F3FF),
+        backgroundColor:
+            isDark ? const Color(0xFF0F0A1E) : const Color(0xFFF5F3FF),
         appBar: AppBar(
           backgroundColor: isDark ? const Color(0xFF1A1030) : roxo,
           foregroundColor: Colors.white,
@@ -922,13 +1443,11 @@ class _LeituraPageState extends State<LeituraPage> with WidgetsBindingObserver {
                     size: 56, color: roxo.withOpacity(0.5)),
               ),
               const SizedBox(height: 24),
-              Text(
-                'Capítulo não baixado',
-                style: TextStyle(
-                    fontSize: 20,
-                    fontWeight: FontWeight.w800,
-                    color: isDark ? Colors.white : Colors.black87),
-              ),
+              Text('Capítulo não baixado',
+                  style: TextStyle(
+                      fontSize: 20,
+                      fontWeight: FontWeight.w800,
+                      color: isDark ? Colors.white : Colors.black87)),
               const SizedBox(height: 10),
               Text(
                 'Você está offline e este capítulo não foi baixado para leitura offline. Conecte-se à internet ou baixe o capítulo antes de sair.',
@@ -953,7 +1472,8 @@ class _LeituraPageState extends State<LeituraPage> with WidgetsBindingObserver {
                   ),
                   icon: const Icon(Icons.arrow_back_rounded),
                   label: const Text('Voltar',
-                      style: TextStyle(fontWeight: FontWeight.w700, fontSize: 15)),
+                      style:
+                          TextStyle(fontWeight: FontWeight.w700, fontSize: 15)),
                 ),
               ),
             ]),

@@ -47,7 +47,11 @@ dependencies:
   uuid: ^4.5.1                 # gerar UUIDs no Dart
   connectivity_plus: ^6.1.5    # detectar se está online ou offline
   flutter_dotenv: ^5.2.1       # ler o arquivo .env
-  
+  emoji_picker_flutter: ^3.1.0
+  image_picker: ^1.1.2
+  http: ^1.2.1  
+
+
 dev_dependencies:
   flutter_test:
     sdk: flutter

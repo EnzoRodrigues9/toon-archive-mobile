@@ -6,4 +6,5 @@ class AppConfig {
   static String get groupId => dotenv.env['GROUP_ID'] ?? 'SF-GP-01';
   static String get huggingFaceApiKey => dotenv.env['HF_API_KEY'] ?? '';
   static const bool isDevelopment = true;
+  static String get giphyApiKey => dotenv.env['GIPHY_API_KEY'] ?? '';
 }

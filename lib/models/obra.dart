@@ -5,7 +5,7 @@ class Obra {
   final String? genero;
   final String status;
   final String? capaUrl;
-  final String? bannerUrl; // <-- novo
+  final String? bannerUrl; 
   final String? autor;
   final int totalCapitulos;
   final bool destaque;
@@ -19,7 +19,7 @@ class Obra {
     this.genero,
     this.status = 'em_andamento',
     this.capaUrl,
-    this.bannerUrl, // <-- novo
+    this.bannerUrl, 
     this.autor,
     this.totalCapitulos = 0,
     this.destaque = false,
@@ -34,7 +34,7 @@ class Obra {
     genero:         map['genero'] as String?,
     status:         map['status'] as String? ?? 'em_andamento',
     capaUrl:        map['capa_url'] as String?,
-    bannerUrl:      map['banner_url'] as String?, // <-- novo
+    bannerUrl:      map['banner_url'] as String?, 
     autor:          map['autor'] as String?,
     totalCapitulos: map['total_capitulos'] as int? ?? 0,
     destaque:       (map['destaque'] as int? ?? 0) == 1,
@@ -49,7 +49,7 @@ class Obra {
     'genero':          genero,
     'status':          status,
     'capa_url':        capaUrl,
-    'banner_url':      bannerUrl, // <-- novo
+    'banner_url':      bannerUrl,
     'autor':           autor,
     'total_capitulos': totalCapitulos,
     'destaque':        destaque ? 1 : 0,
@@ -64,7 +64,7 @@ class Obra {
     genero:         map['genero'] as String?,
     status:         map['status'] as String? ?? 'em_andamento',
     capaUrl:        map['capa_url'] as String?,
-    bannerUrl:      map['banner_url'] as String?, // <-- novo
+    bannerUrl:      map['banner_url'] as String?, 
     autor:          map['autor'] as String?,
     totalCapitulos: map['total_capitulos'] as int? ?? 0,
     destaque:       map['destaque'] as bool? ?? false,
@@ -79,7 +79,7 @@ class Obra {
     'genero':          genero,
     'status':          status,
     'capa_url':        capaUrl,
-    'banner_url':      bannerUrl, // <-- novo
+    'banner_url':      bannerUrl, 
     'autor':           autor,
     'total_capitulos': totalCapitulos,
     'destaque':        destaque,

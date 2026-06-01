@@ -407,6 +407,40 @@ class AuthService {
   }
 
   // ──────────────────────────────────────────────────────────
+  // GARANTIR USUÁRIO NO SUPABASE
+  // Chame antes de qualquer operação que exija FK para usuarios.
+  // Resolve o caso de login Google cujo upsert falhou silenciosamente.
+  // ──────────────────────────────────────────────────────────
+
+  Future<void> garantirUsuarioNoSupabase(Usuario usuario) async {
+    if (!await _online()) return;
+    try {
+      // Verifica se já existe
+      final existe = await _supabase
+          .from('usuarios')
+          .select('id')
+          .eq('id', usuario.id)
+          .maybeSingle();
+      if (existe != null) return; // já existe, nada a fazer
+
+      // Não existe: insere agora
+      await _supabase.from('usuarios').upsert({
+        'id': usuario.id,
+        'nome': usuario.nome,
+        'email': usuario.email,
+        'avatar_url': usuario.avatarUrl,
+        'role': usuario.role,
+        'ativo': true,
+        'criado_em': usuario.criadoEm.toIso8601String(),
+        'atualizado_em': usuario.atualizadoEm.toIso8601String(),
+      }, onConflict: 'id');
+      debugPrint('garantirUsuarioNoSupabase: upsert OK para ${usuario.id}');
+    } catch (e) {
+      debugPrint('garantirUsuarioNoSupabase falhou: $e');
+    }
+  }
+
+  // ──────────────────────────────────────────────────────────
   // USUÁRIO ATUAL
   // ──────────────────────────────────────────────────────────
 
