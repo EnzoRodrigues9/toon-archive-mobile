@@ -75,6 +75,8 @@ class _LeituraPageState extends State<LeituraPage> with WidgetsBindingObserver {
 
   // ── GIFs ──────────────────────────────────────────────────
   List<Map<String, dynamic>> _gifs = [];
+  final _gifFocusNode = FocusNode();
+  bool _gifFieldFocado = false;
   bool _carregandoGifs = false;
 
   // ── Stickers fixos ────────────────────────────────────────
@@ -99,6 +101,9 @@ class _LeituraPageState extends State<LeituraPage> with WidgetsBindingObserver {
   void initState() {
     super.initState();
     WidgetsBinding.instance.addObserver(this);
+    _gifFocusNode.addListener(() {
+      _gifFieldFocado = _gifFocusNode.hasFocus;
+    });
     _inicializar();
   }
 
@@ -110,6 +115,7 @@ class _LeituraPageState extends State<LeituraPage> with WidgetsBindingObserver {
     controller?.dispose();
     comentarioController.dispose();
     _gifController.dispose();
+    _gifFocusNode.dispose();
     super.dispose();
   }
 
@@ -649,11 +655,7 @@ class _LeituraPageState extends State<LeituraPage> with WidgetsBindingObserver {
   }
 
   // =========================================================
-  // WIDGET COMENTÁRIOS (completo)
-  // =========================================================
-
-  // =========================================================
-  // WIDGET COMENTÁRIOS — só o conteúdo (input fica no bottomNavigationBar)
+  // WIDGET COMENTÁRIOS
   // =========================================================
 
   Widget comentariosWidget() {
@@ -661,10 +663,8 @@ class _LeituraPageState extends State<LeituraPage> with WidgetsBindingObserver {
     final isDark = Theme.of(context).brightness == Brightness.dark;
 
     return SingleChildScrollView(
-      // ← AQUI está a correção principal
       padding: EdgeInsets.only(
-        bottom:
-            MediaQuery.of(context).viewInsets.bottom + 80, // espaço pro input
+        bottom: MediaQuery.of(context).viewInsets.bottom + 80,
       ),
       child: Container(
         color: isDark ? const Color(0xFF140F1F) : Colors.white,
@@ -925,7 +925,6 @@ class _LeituraPageState extends State<LeituraPage> with WidgetsBindingObserver {
               ),
             )
           else
-            // ← padding dinâmico com viewInsets.bottom, igual ao grupo_chat
             Padding(
               padding: const EdgeInsets.fromLTRB(8, 8, 8, 8),
               child: Row(children: [
@@ -1047,6 +1046,7 @@ class _LeituraPageState extends State<LeituraPage> with WidgetsBindingObserver {
                   padding: const EdgeInsets.all(8),
                   child: TextField(
                     controller: _gifController,
+                    focusNode: _gifFocusNode,
                     onSubmitted: _buscarGifs,
                     style: TextStyle(
                         color: isDark ? Colors.white : Colors.black87),
@@ -1207,8 +1207,7 @@ class _LeituraPageState extends State<LeituraPage> with WidgetsBindingObserver {
 
     return Scaffold(
       backgroundColor: isDark ? Colors.black : const Color(0xFFF7F4FB),
-      resizeToAvoidBottomInset:
-          false, // ← chave: não redimensiona, gerenciamos manualmente
+      resizeToAvoidBottomInset: false,
       appBar: AppBar(
         backgroundColor: isDark ? const Color(0xFF1A1030) : roxo,
         foregroundColor: Colors.white,
@@ -1230,7 +1229,6 @@ class _LeituraPageState extends State<LeituraPage> with WidgetsBindingObserver {
           ),
         ],
       ),
-      // ← sem bottomNavigationBar; o input fica embutido em cada modo
       body: Stack(
         children: [
           Column(children: [
@@ -1309,7 +1307,7 @@ class _LeituraPageState extends State<LeituraPage> with WidgetsBindingObserver {
             child: comentariosWidget(),
           ),
         ),
-        _inputComentario(isDark, roxo), // ← fixo no fundo da página
+        _inputComentario(isDark, roxo),
       ],
     );
   }
@@ -1318,7 +1316,9 @@ class _LeituraPageState extends State<LeituraPage> with WidgetsBindingObserver {
   void didChangeMetrics() {
     final bottomInset = WidgetsBinding
         .instance.platformDispatcher.views.first.viewInsets.bottom;
-    if (bottomInset > 100 && (_mostrarEmoji || _mostrarMidia)) {
+    if (bottomInset > 100 &&
+        (_mostrarEmoji || _mostrarMidia) &&
+        !_gifFieldFocado) {
       _safeSetState(() {
         _mostrarEmoji = false;
         _mostrarMidia = false;

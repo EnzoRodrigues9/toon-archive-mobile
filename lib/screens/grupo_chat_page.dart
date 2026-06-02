@@ -35,6 +35,8 @@ class _GrupoChatPageState extends State<GrupoChatPage>
   List<Map<String, dynamic>> _gifs = [];
   bool _carregandoGifs = false;
   final _gifController = TextEditingController();
+  final _gifFocusNode = FocusNode();
+  bool _gifFieldFocado = false;
 
   final List<String> _stickers = [
     'https://media.giphy.com/media/xT9IgG50Lg7russbD6/giphy.gif',
@@ -49,6 +51,9 @@ class _GrupoChatPageState extends State<GrupoChatPage>
   void initState() {
     super.initState();
     WidgetsBinding.instance.addObserver(this);
+    _gifFocusNode.addListener(() {
+      _gifFieldFocado = _gifFocusNode.hasFocus;
+    });
     _inicializar();
   }
 
@@ -58,6 +63,7 @@ class _GrupoChatPageState extends State<GrupoChatPage>
     _controller.dispose();
     _scrollController.dispose();
     _gifController.dispose();
+    _gifFocusNode.dispose();
     super.dispose();
   }
 
@@ -65,7 +71,9 @@ class _GrupoChatPageState extends State<GrupoChatPage>
   void didChangeMetrics() {
     final bottomInset = WidgetsBinding
         .instance.platformDispatcher.views.first.viewInsets.bottom;
-    if (bottomInset > 100 && (_mostrarEmoji || _mostrarMidia)) {
+    if (bottomInset > 100 &&
+        (_mostrarEmoji || _mostrarMidia) &&
+        !_gifFieldFocado) {
       setState(() {
         _mostrarEmoji = false;
         _mostrarMidia = false;
@@ -579,6 +587,7 @@ class _GrupoChatPageState extends State<GrupoChatPage>
                   padding: const EdgeInsets.all(8),
                   child: TextField(
                     controller: _gifController,
+                    focusNode: _gifFocusNode,
                     onSubmitted: _buscarGifs,
                     style: TextStyle(
                         color: isDark ? Colors.white : Colors.black87),
