@@ -71,7 +71,7 @@ lib/
 4. Quando a internet é restaurada, o `SyncService` lê o `sync_log` e envia cada operação ao **Supabase** em ordem cronológica
 5. Operações bem-sucedidas são marcadas como sincronizadas
 
-**Tabelas que geram sync_log:** `favoritos`, `downloads`, `progresso_leitura`, `historico_leitura`, `avaliacoes`
+**Tabelas que geram sync_log:** `favoritos`, `downloads`, `progresso_leitura`, `historico_leitura`
 
 **Tabelas somente leitura local:** `obras`, `capitulos`, `paginas`, `comentarios`
 
