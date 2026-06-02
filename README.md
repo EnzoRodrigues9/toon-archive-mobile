@@ -140,7 +140,6 @@ O app usa as seguintes tabelas (tanto no SQLite quanto no Supabase):
 | `historico_leitura` | Capítulos concluídos (máx. 100 por usuário) |
 | `generos` | Catálogo de gêneros (ação, romance, etc.) |
 | `obra_generos` | Relacionamento obra ↔ gênero |
-| `avaliacoes` | Notas de 1 a 5 por obra |
 | `comentarios` | Comentários nos capítulos |
 | `sync_log` | Fila de operações offline pendentes |
 
