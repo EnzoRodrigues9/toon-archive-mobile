@@ -249,9 +249,9 @@ class _DetalhePageState extends State<DetalhePage> {
                   : IconButton(
                       icon: Icon(
                         _isFavorito
-                            ? Icons.bookmark_rounded
-                            : Icons.bookmark_border_rounded,
-                        color: Colors.white,
+                            ? Icons.favorite_rounded
+                            : Icons.favorite_border_rounded,
+                        color: Colors.red,
                       ),
                       onPressed: _toggleFavorito,
                     ),

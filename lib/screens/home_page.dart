@@ -169,16 +169,17 @@ class _HomePageState extends State<HomePage> {
     showModalBottomSheet(
       context: context,
       backgroundColor: Colors.transparent,
-      isScrollControlled: true, // ← adicionar
-      useSafeArea: true, // ← adicionar
+      isScrollControlled: true,
+      useSafeArea: true,
       builder: (ctx) => Container(
         decoration: BoxDecoration(
           color: isDark ? const Color(0xFF1A1030) : Colors.white,
           borderRadius: const BorderRadius.vertical(top: Radius.circular(28)),
         ),
         padding: EdgeInsets.fromLTRB(
-          // ← era const, agora é dinâmico
-          24, 16, 24,
+          24,
+          16,
+          24,
           MediaQuery.of(ctx).padding.bottom + 24,
         ),
         child: Column(
@@ -703,8 +704,9 @@ class _HomePageState extends State<HomePage> {
                                   final obra = _obras.firstWhere(
                                     (o) => o.titulo == b['titulo'],
                                     orElse: () => _obras.firstWhere(
-                                      (o) => o.titulo.toLowerCase().contains(
-                                            b['titulo']!.toLowerCase()),
+                                      (o) => o.titulo
+                                          .toLowerCase()
+                                          .contains(b['titulo']!.toLowerCase()),
                                       orElse: () => _obras.first,
                                     ),
                                   );
@@ -825,8 +827,8 @@ class _HomePageState extends State<HomePage> {
               ),
               child: Icon(
                   mostrarFavoritos
-                      ? Icons.star_rounded
-                      : Icons.star_border_rounded,
+                      ? Icons.favorite_rounded
+                      : Icons.favorite_border_rounded,
                   color: Colors.white,
                   size: 20),
             ),
