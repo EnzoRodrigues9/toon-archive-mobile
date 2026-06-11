@@ -42,23 +42,74 @@ O ToonArchive permite que usuários leiam obras, favoritem capítulos, façam do
 
 ```
 lib/
-├── main.dart                    # Ponto de entrada do app
-├── core/
-│   ├── database/
-│   │   ├── database_helper.dart # Gerencia o SQLite local
-│   │   └── supabase_client.dart # Inicializa o cliente Supabase
-│   ├── sync/
-│   │   └── sync_service.dart    # Sincroniza dados offline → Supabase
-│   └── helpers/
-│       └── app_config.dart      # Lê variáveis do .env
-├── models/                      # Classes de dados (Obra, Capitulo, Usuario...)
-├── repositories/                # Acesso a dados (SQLite + Supabase com fallback)
-├── services/                    # Lógica de negócio (auth, download, recomendação)
-├── screens/                     # Páginas do app (home, leitura, login...)
-├── routes/
-│   └── app_routes.dart          # Definição de rotas de navegação
-└── widgets/
-    └── obra_card.dart           # Card reutilizável de obra
+├── main.dart                          # Ponto de entrada do app
+├── firebase_options.dart              # Configurações geradas pelo FlutterFire CLI
+├── app_routes.dart                    # Definição de rotas de navegação
+└── app/
+    ├── core/
+    │   ├── database/
+    │   │   ├── database_helper.dart   # Gerencia o SQLite local
+    │   │   └── supabase_client.dart   # Inicializa o cliente Supabase
+    │   ├── sync/
+    │   │   └── sync_service.dart      # Sincroniza dados offline → Supabase
+    │   ├── services/
+    │   │   ├── auth_service.dart      # Lógica de autenticação (email, Google, offline)
+    │   │   ├── download_service.dart  # Download de páginas para leitura offline
+    │   │   └── recomendacao_service.dart # Recomendações por IA (Hugging Face)
+    │   └── helpers/
+    │       └── app_config.dart        # Lê variáveis do .env
+    ├── modules/
+    │   ├── auth/
+    │   │   └── presentation/pages/
+    │   │       ├── login_page.dart
+    │   │       └── cadastro_page.dart
+    │   ├── capitulos/
+    │   │   ├── capitulo.dart
+    │   │   ├── capitulos_repository.dart
+    │   │   └── presentation/pages/
+    │   │       └── leitura_page.dart
+    │   ├── comunidade/
+    │   │   └── presentation/pages/
+    │   │       └── comunidade_page.dart
+    │   ├── downloads/
+    │   │   ├── download.dart
+    │   │   ├── downloads_repository.dart
+    │   │   └── presentation/pages/
+    │   │       └── downloads_page.dart
+    │   ├── favoritos/
+    │   │   └── favoritos_repository.dart
+    │   ├── generos/
+    │   │   ├── genero.dart
+    │   │   └── generos_repository.dart
+    │   ├── grupochat/
+    │   │   └── presentation/pages/
+    │   │       └── grupo_chat_page.dart
+    │   ├── historicoleitura/
+    │   │   └── historico_leitura.dart
+    │   ├── home/
+    │   │   └── presentation/pages/
+    │   │       └── home_page.dart
+    │   ├── obras/
+    │   │   ├── obra.dart
+    │   │   ├── obras_repository.dart
+    │   │   └── presentation/pages/
+    │   │       └── detalhe_page.dart
+    │   ├── paginas/
+    │   │   ├── pagina.dart
+    │   │   └── paginas_repository.dart
+    │   ├── progresso/
+    │   │   └── progresso_repository.dart
+    │   ├── progressoleitura/
+    │   │   └── progresso_leitura.dart
+    │   ├── splash/
+    │   │   └── presentation/pages/
+    │   │       └── splash_page.dart
+    │   └── usuarios/
+    │       └── usuario.dart
+    └── shared/
+        └── widgets/
+            ├── app_theme.dart         # Sistema de design centralizado
+            └── obra_card.dart         # Card reutilizável de obra
 ```
 
 ---

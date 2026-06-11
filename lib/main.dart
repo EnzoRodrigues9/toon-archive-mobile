@@ -1,15 +1,13 @@
 import 'package:flutter/material.dart';
 import 'package:firebase_core/firebase_core.dart';
 
-import 'firebase_options.dart';
-import 'core/database/database_helper.dart';
-import 'core/database/supabase_client.dart';
-import 'core/sync/sync_service.dart';
-import 'routes/app_routes.dart';
-import 'screens/splash_page.dart';
+import 'package:toonarchive/firebase_options.dart';
+import 'package:toonarchive/app/core/database/database_helper.dart';
+import 'package:toonarchive/app/core/database/supabase_client.dart';
+import 'package:toonarchive/app/core/sync/sync_service.dart';
+import 'package:toonarchive/app/app_routes.dart';
+import 'package:toonarchive/app/modules/splash/presentation/pages/splash_page.dart';
 
-import 'package:sqflite/sqflite.dart';
-import 'package:path/path.dart' as p;
 import 'package:flutter_dotenv/flutter_dotenv.dart';
 
 void main() async {
